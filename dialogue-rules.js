@@ -1,16 +1,16 @@
 const DialogueRules = (() => {
   const taskPatterns = {
-    apple: /\b(apple|here you are|here it is)\b/,
-    milk: /\bmilk\b/,
-    plate: /\bplate\b/,
-    cup: /\bcup\b/,
-    spoon: /\bspoon\b/,
-    ticket: /\b(ticket|here you are|here it is)\b/,
-    bag: /\b(yes|no|mine|my|not|isn t|isnt)\b/,
-    'gate-a12': /\b(a12|a 12|gate 12|gate twelve)\b/,
-    'office-purpose': /\b(maya|here to see|here to meet|here for)\b/,
-    'office-signin': /\bsign\b/,
-    'office-greeting': /\b(hi|hello|nice|meet|you too)\b/,
+    apple: /^(?:(?:it s|it is|that s|that is|this is|i found|i have|here is) )?(?:(?:the|an|a) )?apple$|^here (?:you are|it is)$/,
+    milk: /^(?:(?:it s|it is|this is|i found|here is) )?(?:the )?milk$|^(?:the )?milk is here$/,
+    plate: /^(?:(?:it s|it is|this is|i found|here is) )?(?:(?:a|the) )?plate$/,
+    cup: /^(?:(?:it s|it is|this is|i touched|here is) )?(?:(?:a|the) )?cup$/,
+    spoon: /^(?:(?:it s|it is|this is|i found|here is) )?(?:(?:a|the) )?spoon$/,
+    ticket: /^(?:(?:here is|this is) )?(?:(?:my|the|a) )?ticket$|^here (?:you are|it is)$/,
+    bag: /^(?:yes|no|mine|it s mine|it is mine|that s my bag|that is my bag|yes it is mine|no it is not mine|no it isn t mine|it is not my bag)$/,
+    'gate-a12': /^(?:(?:i found|i see|it is|it s|here is) )?(?:gate )?(?:a12|a 12|12|twelve)$/,
+    'office-purpose': /^(?:(?:i m|i am) )?(?:here to (?:see|meet) )?maya$/,
+    'office-signin': /^(?:i signed in|i am signing in|i will sign in|sign in)$/,
+    'office-greeting': /^(?:hi|hello|hi maya|hello maya|nice to meet you|nice to meet you too|you too)$/,
   };
 
   const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();

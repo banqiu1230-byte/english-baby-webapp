@@ -13,7 +13,7 @@
     <link rel="preload" href="./assets/apple.png" as="image" />
     <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/regular/style.css" />
     <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/fill/style.css" />
-    <link rel="stylesheet" href="./styles.css?v=40" />
+    <link rel="stylesheet" href="./styles.css?v=41" />
   </head>
   <body>
     <div class="app-frame" id="appFrame">
@@ -178,6 +178,9 @@
             <section class="language-panel" id="languagePanel" aria-live="polite" hidden><div class="recent-dialogue" id="recentDialogue"></div><button class="dialogue-history-button" id="openDialogueHistory" type="button">全部对话 <i class="ph ph-caret-up"></i></button></section>
             <aside class="dialogue-history" id="dialogueHistory" aria-label="全部对话" aria-hidden="true"><button class="dialogue-history-backdrop" id="closeDialogueHistoryBackdrop" type="button" aria-label="关闭全部对话"></button><div class="dialogue-history-panel"><header><div><small>场景对话</small><h2>全部对话</h2></div><button id="closeDialogueHistory" type="button" aria-label="关闭全部对话"><i class="ph ph-x"></i></button></header><div class="dialogue-history-list" id="dialogueHistoryList"></div></div></aside>
             <nav class="scene-controls" aria-label="情境控制"><button class="round-control" id="replayButton" type="button" aria-label="重新听一遍"><i class="ph ph-speaker-high"></i><span>重听</span></button><button class="mic-control" id="micButton" type="button" aria-label="打开麦克风" aria-pressed="false"><span class="mic-ripple"></span><i class="ph ph-microphone"></i><span id="micLabel">自动聆听</span></button><button class="round-control" id="helpButton" type="button" aria-label="获得提示"><i class="ph ph-lightbulb"></i><span>提示</span></button></nav>
+            <div class="voice-status" id="voiceStatus" role="status" aria-live="polite">正在连接语音…</div>
+            <button class="text-answer-toggle" id="textAnswerToggle" type="button" aria-label="输入文字回答" aria-expanded="false"><i class="ph ph-keyboard"></i><span>打字</span></button>
+            <form class="text-answer" id="textAnswerForm" hidden><label class="sr-only" for="textAnswer">你的回答</label><input id="textAnswer" name="answer" type="text" maxlength="1000" placeholder="可以用英语或中文说" autocomplete="off" enterkeyhint="send" /><button type="submit" aria-label="发送回答"><i class="ph ph-arrow-up"></i></button></form>
             <div class="toast" id="toast" role="status" aria-live="polite"></div>
           </div>
         </section>
@@ -196,7 +199,8 @@
         </section>
       </main>
     </div>
-    <script src="./dialogue-rules.js?v=3" defer></script>
-    <script src="./app.js?v=106" defer></script>
+    <script src="./dialogue-rules.js?v=4" defer></script>
+    <script src="./voice-runtime.js?v=1" defer></script>
+    <script src="./app.js?v=107" defer></script>
   </body>
 </html>

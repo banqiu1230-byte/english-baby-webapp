@@ -62,6 +62,12 @@ const growthTransferMeter = document.querySelector('#growthTransferMeter');
 const profileHeard = document.querySelector('#profileHeard');
 const profileActions = document.querySelector('#profileActions');
 const profileSpoken = document.querySelector('#profileSpoken');
+const voiceStatus = document.querySelector('#voiceStatus');
+const textAnswerForm = document.querySelector('#textAnswerForm');
+const textAnswerInput = document.querySelector('#textAnswer');
+const textAnswerToggle = document.querySelector('#textAnswerToggle');
+const transcriptLedger = new VoiceRuntime.TranscriptLedger();
+const microphoneBuffer = new VoiceRuntime.PcmBuffer();
 
 let sheetTrigger = null;
 let appToastTimer = null;
@@ -115,16 +121,16 @@ const SCENES = {
 
 const KITCHEN_TASKS = [
   {
-    id: 'apple', interaction: 'drag', requiresAction: true, prompt: 'Can you give me the apple?', translation: '把苹果递给我，好吗？',
+    id: 'apple', interaction: 'drag', requiresAction: true, prompt: 'Give me the apple, please.', translation: '把苹果递给我，好吗？',
     actionSuccess: 'Thank you! You gave me the apple.', actionTranslation: '谢谢！你把苹果递给我了。',
     question: 'What is it?', questionTranslation: '这是什么？', answer: 'apple',
     spokenSuccess: 'Yes — an apple. You said it.', spokenTranslation: '对，是苹果。你已经说出来了。',
     natural: ["It’s an apple.", 'That’s an apple.', 'I found an apple.'], actionPrompt: 'Good. Give me the apple.', hint: '把红苹果拖到 Luma 的手边。',
   },
   {
-    id: 'milk', interaction: 'tap', requiresAction: true, prompt: 'Can you find the milk?', translation: '你能找到牛奶吗？',
+    id: 'milk', interaction: 'tap', requiresAction: true, prompt: 'Find the milk.', translation: '你能找到牛奶吗？',
     actionSuccess: 'Yes, that is the milk.', actionTranslation: '对，那是牛奶。',
-    question: 'What did you find?', questionTranslation: '你找到了什么？', answer: 'milk',
+    question: 'What is it?', questionTranslation: '这是什么？', answer: 'milk',
     spokenSuccess: 'Milk. You found the milk.', spokenTranslation: '牛奶。你找到了牛奶。',
     natural: ['I found the milk.', 'Here is the milk.', 'The milk is here.'], actionPrompt: 'Good. Touch the milk.', hint: '点一下桌上的牛奶瓶。',
   },
@@ -138,23 +144,23 @@ const KITCHEN_TASKS = [
   {
     id: 'cup', interaction: 'tap', requiresAction: true, prompt: 'Touch the cup.', translation: '碰一下杯子。',
     actionSuccess: 'Good. That is the cup.', actionTranslation: '很好，那是杯子。',
-    question: 'What did you touch?', questionTranslation: '你碰了什么？', answer: 'cup',
+    question: 'What is it?', questionTranslation: '这是什么？', answer: 'cup',
     spokenSuccess: 'A cup. You touched the cup.', spokenTranslation: '一个杯子。你碰了杯子。',
     natural: ['I touched the cup.', 'This is the cup.', 'Here is the cup.'], actionPrompt: 'Yes. Touch the cup.', hint: '点一下桌子右侧的杯子。',
   },
   {
-    id: 'spoon', interaction: 'tap', requiresAction: true, prompt: 'Can you find the spoon?', translation: '你能找到勺子吗？',
+    id: 'spoon', interaction: 'tap', requiresAction: true, prompt: 'Find the spoon.', translation: '你能找到勺子吗？',
     actionSuccess: 'Yes, that is the spoon.', actionTranslation: '对，那是勺子。',
-    question: 'What did you find?', questionTranslation: '你找到了什么？', answer: 'spoon',
+    question: 'What is it?', questionTranslation: '这是什么？', answer: 'spoon',
     spokenSuccess: 'A spoon. You found the spoon.', spokenTranslation: '一把勺子。你找到了勺子。',
     natural: ['I found the spoon.', 'Here is the spoon.', 'The spoon is here.'], actionPrompt: 'Good. Touch the spoon.', hint: '点一下盘子下面的勺子。',
   },
 ];
 
 const AIRPORT_TASKS = [
-  { id: 'ticket', interaction: 'tap', requiresAction: true, prompt: 'Can I see your ticket?', actionPrompt: 'Good. Show me the ticket.', hint: '点一下手里的登机牌。' },
+  { id: 'ticket', interaction: 'tap', requiresAction: true, prompt: 'Your ticket, please.', actionPrompt: 'Good. Show me the ticket.', hint: '点一下手里的登机牌。' },
   { id: 'bag', interaction: 'speech', requiresAction: false, prompt: 'Is this your bag?', hint: '直接回答 Luma，不需要点击行李箱。' },
-  { id: 'gate-a12', interaction: 'tap', requiresAction: true, prompt: 'Can you find gate A12?', actionPrompt: 'Point to the A12 sign, please.', hint: '点一下画面中的 A12，表示你已经指出了登机口。' },
+  { id: 'gate-a12', interaction: 'tap', requiresAction: true, prompt: 'Find A12.', actionPrompt: 'Point to the A12 sign, please.', hint: '点一下画面中的 A12，表示你已经指出了登机口。' },
 ];
 
 const OFFICE_TASKS = [
@@ -196,8 +202,6 @@ const SCENE_CONFIGS = {
 
 const FINAL_REVIEW_DWELL_MS = 4200;
 const TASK_ADVANCE_DWELL_MS = 2600;
-const BARGE_IN_GUARD_MS = 80;
-const CONTINUATION_WINDOW_MS = 1200;
 const LEARNING_PROFILE_KEY = 'luma-learning-profile-v1';
 const TURN_PHASE = Object.freeze({
   PRESENTING: 'presenting',
@@ -243,6 +247,19 @@ const state = {
   audioSource: null,
   audioProcessor: null,
   audioSink: null,
+  audioFilter: null,
+  captureGeneration: 0,
+  practiceSession: 0,
+  messageSerial: 0,
+  playbackGeneration: 0,
+  speechRequestSerial: 0,
+  connectionGeneration: 0,
+  firstPacketTimer: null,
+  bufferOverflow: false,
+  audioWorkletLoaded: false,
+  captionAudioStart: 0,
+  lastCharacterEndedAt: 0,
+  pendingFeedback: new Set(),
   captureSampleRate: 16000,
   duplexSocket: null,
   duplexReady: false,
@@ -393,13 +410,9 @@ function isActionAcknowledgement(task, text, question = state.activeQuestion || 
     && /^(?:yes|yeah|yep|ok|okay|sure|all right|alright|here|here you go|i can|i will)$/.test(heard);
 }
 
-function responseCompletesTaskSpeech(task, text, question = state.activeQuestion || state.currentSpeech) {
-  if (!taskNeedsSpeech(task)) return true;
-  return DialogueRules.matchesTask(task.id, text);
-}
-
 function captureUserTurnContext() {
   return {
+    practiceSession: state.practiceSession,
     sceneId: state.selectedScene,
     taskId: currentTask().id,
     taskIndex: state.taskIndex,
@@ -414,6 +427,17 @@ function setVoicePhase(phase) {
   if (state.handsFreeListening && state.sceneStarted) {
     micLabel.textContent = phase === 'recording' ? '正在听' : '随时说';
   }
+  syncVoiceStatus();
+}
+
+function syncVoiceStatus() {
+  const text = state.micMuted ? '麦克风已关闭 · 也可以打字'
+    : !state.handsFreeListening ? '正在准备麦克风…'
+    : !state.duplexReady ? (state.bufferOverflow ? '连接较慢 · 请稍候或打字' : '正在连接 · 已暂存你的声音')
+    : state.voicePhase === 'recording' ? '正在听你说'
+    : '麦克风已开 · 随时说话';
+  if (voiceStatus.textContent !== text) voiceStatus.textContent = text;
+  scene.dataset.connectionState = state.duplexReady ? 'ready' : 'connecting';
 }
 
 function sceneVoiceIsOpen() {
@@ -440,7 +464,7 @@ function startVoiceHealthMonitor() {
       stopVoiceHealthMonitor();
       return;
     }
-    if (document.visibilityState !== 'visible' || state.micMuted) return;
+    if (document.visibilityState !== 'visible' || state.micMuted || state.micStarting) return;
     const microphoneTrack = state.mediaStream?.getAudioTracks()[0];
     const trackIsLive = Boolean(microphoneTrack
       && microphoneTrack.readyState === 'live'
@@ -526,12 +550,6 @@ function beginExpectedResponse(kind, { questionId = '', turnId = 0 } = {}) {
   return state.expectedResponse;
 }
 
-function bindExpectedResponseQuestion(questionId) {
-  const expected = state.expectedResponse;
-  if (!expected || expected.kind !== 'user' || !questionId) return;
-  if (!expected.questionId) expected.questionId = String(questionId);
-}
-
 function retireExpectedResponse() {
   const expected = state.expectedResponse;
   if (!expected) return;
@@ -561,80 +579,21 @@ function acceptResponseEvent(event) {
     rememberBounded(state.ignoredQuestionIds, questionId);
     return false;
   }
-  if (expected.kind === 'user' && questionId && state.activeVoiceTurn?.itemId
-    && state.activeVoiceTurn.itemId !== questionId) {
-    rememberBounded(state.ignoredResponseIds, responseId);
-    rememberBounded(state.ignoredQuestionIds, questionId);
-    return false;
-  }
   if (!expected.responseId && responseId) expected.responseId = responseId;
   if (!expected.questionId && questionId) expected.questionId = questionId;
   return true;
 }
 
-function rememberIgnoredTranscriptItem(itemId) {
-  rememberBounded(state.ignoredTranscriptItems, itemId);
-}
-
 function acceptTranscriptEvent(event, { allowStart = false } = {}) {
   const itemId = transcriptItemId(event);
-  if (itemId && state.ignoredTranscriptItems.has(itemId)) return false;
-  const recentBargeIn = isConversationPlaybackActive() && Date.now() - state.lastBargeInEnergyAt < 900;
-  const recentServerSpeech = Date.now() - state.lastServerSpeechAt < 1800;
-  if (!state.activeVoiceTurn
-    && allowStart
-    && sceneVoiceIsOpen()
-    && (!isConversationPlaybackActive() || recentBargeIn)
-    && (recentServerSpeech || Date.now() - state.lastVoiceEnergyAt < 900)) {
-    beginLocalSpeechTurn({ contextOverride: state.pendingServerTurnContext });
+  let turn = itemId ? transcriptLedger.items.get(itemId) : state.activeVoiceTurn;
+  if (!turn && allowStart && sceneVoiceIsOpen()) {
+    turn = transcriptLedger.bind(itemId, state.pendingServerTurnContext || captureUserTurnContext(), state.activeVoiceTurn);
+    state.activeVoiceTurn = turn;
+    state.pendingServerTurnContext = null;
   }
-  const turn = state.activeVoiceTurn;
-  if (!turn) {
-    rememberIgnoredTranscriptItem(itemId);
-    return false;
-  }
-  if (itemId && turn.itemId && turn.itemId !== itemId) {
-    rememberIgnoredTranscriptItem(itemId);
-    return false;
-  }
-  if (itemId && !turn.itemId) turn.itemId = itemId;
-  bindExpectedResponseQuestion(itemId);
-  return true;
-}
-
-function sameTurnContext(left, right) {
-  return Boolean(left && right
-    && left.sceneId === right.sceneId
-    && left.taskId === right.taskId
-    && left.taskIndex === right.taskIndex);
-}
-
-function continuationCandidate(context) {
-  const last = state.lastFinalizedUser;
-  const expected = state.expectedResponse;
-  if (!last || !expected || expected.kind !== 'user' || expected.audioStarted) return null;
-  if (!state.awaitingModelReply || Date.now() - last.at > CONTINUATION_WINDOW_MS) return null;
-  if (!sameTurnContext(last.context, context)) return null;
-  const message = state.dialogueHistory[last.index];
-  return message?.speaker === 'user' ? last : null;
-}
-
-function joinTranscriptParts(first, second) {
-  const left = String(first || '').trim().replace(/[.!?,;:]+$/u, '');
-  let right = String(second || '').trim();
-  if (!left) return right;
-  if (!right) return left;
-  const normalizedLeft = normalizedSpeech(left);
-  const normalizedRight = normalizedSpeech(right);
-  if (normalizedRight.startsWith(normalizedLeft)) return right;
-  if (normalizedLeft.endsWith(normalizedRight)) return `${left}.`;
-  if (!/^(?:maya|a\d+)/i.test(right)) right = `${right[0].toLowerCase()}${right.slice(1)}`;
-  return `${left} ${right}`;
-}
-
-function transcriptForActiveTurn(fragment) {
-  const continuationText = state.activeVoiceTurn?.continuationText;
-  return continuationText ? joinTranscriptParts(continuationText, fragment) : String(fragment || '').trim();
+  if (!turn || turn.context.practiceSession !== state.practiceSession || turn.final) return null;
+  return turn;
 }
 
 function clearLocalSpeechTurn({ keepContext = false } = {}) {
@@ -654,133 +613,96 @@ function clearLocalSpeechTurn({ keepContext = false } = {}) {
   if (!keepContext) state.userTurnContext = null;
 }
 
-function armVoiceTurnWatchdog() {
-  clearTimeout(state.voiceTurnWatchdogTimer);
-  const turnId = state.activeVoiceTurn?.id;
-  if (!turnId) return;
-  state.voiceTurnWatchdogTimer = setTimeout(() => {
-    if (state.activeVoiceTurn?.id !== turnId) return;
-    const transcript = state.duplexTranscript.trim();
-    if (transcript) {
-      scene.dataset.voiceRecovery = 'stalled-final-event';
-      finalizeLearnerTranscript(transcript, {
-        passiveTurn: Boolean(state.activeVoiceTurn?.passive),
-        turnContext: state.activeVoiceTurn?.context || state.userTurnContext || captureUserTurnContext(),
-        transcriptIndex: state.streamingUserIndex,
-      });
-      return;
-    }
-    const index = state.streamingUserIndex;
-    if (Number.isInteger(index) && state.dialogueHistory[index]?.text === '…') {
-      removeDialogueMessage(index);
-    }
-    scene.dataset.voiceRecovery = 'no-transcript';
-    retireExpectedResponse();
-    if (state.duplexReady) sendDuplex({ type: 'response.cancel' });
-    clearLocalSpeechTurn();
-    openLearnerTurn();
-  }, 6000);
+function updateLearnerTurn(turn, text, final = false) {
+  if (!transcriptLedger.update(turn, text, final)) return;
+  if (!turn.text) return;
+  let message = state.dialogueHistory.find(item => item.id === turn.messageId);
+  if (!message) {
+    const index = addDialogueMessage('user', turn.text);
+    message = state.dialogueHistory[index];
+    turn.messageId = message.id;
+  }
+  message.text = turn.text;
+  message.revision = turn.revision;
+  message.final = final;
+  message.status = final ? '' : '正在识别';
+  renderDialogue();
+  if (state.activeVoiceTurn === turn) state.streamingUserIndex = state.dialogueHistory.indexOf(message);
 }
 
-function finalizeLearnerTranscript(transcript, {
-  passiveTurn = Boolean(state.activeVoiceTurn?.passive),
-  turnContext = state.activeVoiceTurn?.context || state.userTurnContext || captureUserTurnContext(),
-  transcriptIndex = state.streamingUserIndex,
-} = {}) {
-  const activeTurn = state.activeVoiceTurn;
-  const cleanTranscript = transcriptForActiveTurn(transcript);
-  state.duplexTranscript = '';
-  cleanupSpeechCaptureUi();
-  state.transcriptionStartedAt = 0;
-  if (!cleanTranscript) {
-    retireExpectedResponse();
-    if (state.duplexReady) sendDuplex({ type: 'response.cancel' });
+function confirmLearnerTurn(turn, text) {
+  if (turn.confirmed || !VoiceRuntime.isSpeechText(text)) return;
+  const playback = isConversationPlaybackActive();
+  // Volume / VAD alone cannot distinguish a keyboard or door from a learner.
+  if (playback && VoiceRuntime.isPlaybackEcho(text, state.currentSpeech)) return;
+  turn.confirmed = true;
+  // A late first hypothesis may fill its old bubble, never take a newer floor.
+  turn.superseded = [...transcriptLedger.items.values()].some(item => item.confirmed && item.id > turn.id);
+  if (turn.superseded) return;
+  clearIdleNudge();
+  state.idleNudgeCount = 0;
+  if (state.expectedResponse?.turnId !== turn.id) {
+    stopSpeechPlayback();
+    beginExpectedResponse('user', { questionId: turn.itemId, turnId: turn.id });
+  }
+  state.activeVoiceTurn = turn;
+  state.userTurnContext = turn.context;
+  state.userTranscriptPending = true;
+  state.localSpeechActive = true;
+  setVoicePhase('recording');
+}
+
+function armVoiceTurnWatchdog() {
+  clearTimeout(state.voiceTurnWatchdogTimer);
+  const turn = state.activeVoiceTurn;
+  if (!turn) return;
+  state.voiceTurnWatchdogTimer = setTimeout(() => {
+    if (state.activeVoiceTurn !== turn) return;
+    const message = state.dialogueHistory.find(item => item.id === turn.messageId);
+    if (message) { message.status = '识别未完成'; renderDialogue(); }
     clearLocalSpeechTurn();
-    if (activeTurn?.continuationText && Number.isInteger(transcriptIndex)) {
-      const message = state.dialogueHistory[transcriptIndex];
-      if (message) message.text = activeTurn.continuationText;
-      renderDialogue();
-    } else if (Number.isInteger(transcriptIndex) && transcriptIndex >= 0) {
-      removeDialogueMessage(transcriptIndex);
-    }
-    state.streamingUserIndex = null;
-    micButton.disabled = false;
-    openLearnerTurn();
-    return;
-  }
-  updateUserDialogue(cleanTranscript, true);
-  bindExpectedResponseQuestion(activeTurn?.itemId);
-  const finalIndex = Number.isInteger(state.pendingUserIndex) ? state.pendingUserIndex : transcriptIndex;
-  state.lastFinalizedUser = Number.isInteger(finalIndex)
-    ? { index: finalIndex, text: cleanTranscript, context: turnContext, at: Date.now() }
-    : null;
-  clearLocalSpeechTurn({ keepContext: true });
-  setVoicePhase('listening');
-  state.awaitingModelReply = true;
-  if (!state.expectedResponse) beginExpectedResponse('user', { questionId: activeTurn?.itemId });
-  armReplyTimeout();
-  setTurnPhase(TURN_PHASE.CHARACTER_SPEAKING, `${currentTask().speaker || 'Luma'} 正在回应 · 仍可继续说`);
-  if (!passiveTurn && state.stage === 'active') {
-    // Task scoring is background bookkeeping. It must never block, reject, or
-    // replace the character's natural response to this learner utterance.
-    requestLanguageFeedback(turnContext.question, cleanTranscript, turnContext);
+    if (turn.confirmed && !turn.responseStarted) {
+      state.awaitingModelReply = true;
+      armReplyTimeout();
+    } else { openLearnerTurn(); scheduleIdleNudge(); }
+  }, 10000);
+}
+
+function finalizeLearnerTranscript(transcript, { turn = state.activeVoiceTurn } = {}) {
+  if (!turn || turn.final || turn.context.practiceSession !== state.practiceSession) return;
+  const clean = String(transcript || '').trim();
+  if (VoiceRuntime.isSpeechText(clean)) {
+    confirmLearnerTurn(turn, clean);
+    if (turn.confirmed) updateLearnerTurn(turn, clean, true);
+    else turn.final = true;
   } else {
-    state.pendingUserIndex = null;
+    const message = state.dialogueHistory.find(item => item.id === turn.messageId);
+    if (message) { message.status = '识别未完成'; renderDialogue(); }
+    turn.final = true;
   }
-  state.userTurnContext = null;
+  if (state.activeVoiceTurn === turn) {
+    clearLocalSpeechTurn();
+    state.duplexTranscript = '';
+    cleanupSpeechCaptureUi();
+    setVoicePhase('listening');
+  }
+  if (!turn.confirmed) { openLearnerTurn(); scheduleIdleNudge(); return; }
+  if (!turn.superseded && !turn.responseStarted && (!state.expectedResponse || state.expectedResponse.turnId === turn.id)) {
+    if (!state.expectedResponse) beginExpectedResponse('user', { questionId: turn.itemId, turnId: turn.id });
+    state.awaitingModelReply = true;
+    armReplyTimeout();
+  }
+  const message = state.dialogueHistory.find(item => item.id === turn.messageId);
+  if (clean && message) requestLanguageFeedback(turn.context.question, clean, {
+    ...turn.context, messageId: message.id, revision: message.revision, final: true,
+  });
   publishDuplexSubtitle();
 }
 
 function beginLocalSpeechTurn({ contextOverride = null } = {}) {
-  const playbackActive = isConversationPlaybackActive();
-  const interruptingCharacter = playbackActive
-    && Date.now() - state.lumaStartedAt > BARGE_IN_GUARD_MS
-    && Date.now() - state.lastBargeInEnergyAt < 900;
-  if (!sceneVoiceIsOpen()
-    || state.activeVoiceTurn
-    || (playbackActive && !interruptingCharacter)) return false;
-  clearTimeout(state.courtesyTimer);
-  state.courtesyTimer = null;
-  const context = contextOverride || captureUserTurnContext();
-  const continuation = continuationCandidate(context);
-  if (interruptingCharacter) {
-    clearReplyTimeout();
-    state.awaitingPrompt = false;
-    state.awaitingModelReply = false;
-    state.nudgeInFlight = false;
-    scene.dataset.lastBargeInAt = String(Date.now());
-    stopDuplexPlayback({ cancel: true });
-  }
-  // A new utterance owns the floor. Any older model response may still finish
-  // server-side, but it can no longer close or score this new learner turn.
-  if (state.awaitingModelReply) {
-    clearReplyTimeout();
-    state.awaitingModelReply = false;
-    stopDuplexPlayback({ cancel: true });
-  } else if (state.expectedResponse) {
-    state.awaitingPrompt = false;
-    stopDuplexPlayback({ cancel: true });
-  }
-  state.userTurnContext = context;
-  const turnId = ++state.voiceTurnSerial;
-  state.activeVoiceTurn = {
-    id: turnId,
-    itemId: '',
-    context,
-    passive: state.stage !== 'active' || state.speechDone,
-    continuationText: continuation?.text || '',
-  };
-  beginExpectedResponse('user', { turnId });
-  setVoicePhase('recording');
-  state.localSpeechActive = true;
-  state.userTranscriptPending = true;
-  if (continuation) {
-    state.streamingUserIndex = continuation.index;
-    state.pendingUserIndex = continuation.index;
-  } else if (!isDuplexPlaybackActive() && state.streamingUserIndex === null) {
-    state.streamingUserIndex = addDialogueMessage('user', '…');
-    setTurnPhase(TURN_PHASE.LISTENING, '正在听你说', 'is-listening');
-  }
+  if (!sceneVoiceIsOpen() || state.activeVoiceTurn) return false;
+  state.activeVoiceTurn = transcriptLedger.create(contextOverride || captureUserTurnContext());
+  // A VAD event is a candidate. Only actual words may interrupt playback.
   armVoiceTurnWatchdog();
   return true;
 }
@@ -936,36 +858,32 @@ function escapeHtml(value) {
 }
 
 function dialogueMarkup(message) {
-  return `<article class="dialogue-bubble is-${message.speaker}"><small>${message.speaker === 'user' ? '你' : escapeHtml(message.name || 'Luma')}</small><p>${escapeHtml(message.text)}</p></article>`;
+  return `<article class="dialogue-bubble is-${message.speaker}" data-message-id="${message.id}"><small>${message.speaker === 'user' ? '你' : escapeHtml(message.name || 'Luma')}</small><p>${escapeHtml(message.text)}</p><span class="transcript-status">${escapeHtml(message.status || '')}</span></article>`;
 }
 
 function renderDialogue() {
+  const updateList = (container, messages) => {
+    const ids = new Set(messages.map(message => String(message.id)));
+    [...container.children].forEach(node => { if (!ids.has(node.dataset.messageId)) node.remove(); });
+    for (const message of messages) {
+      let node = [...container.children].find(item => item.dataset.messageId === String(message.id));
+      if (!node) { container.insertAdjacentHTML('beforeend', dialogueMarkup(message)); node = container.lastElementChild; }
+      const text = node.querySelector('p'), status = node.querySelector('.transcript-status');
+      if (text.textContent !== message.text) text.textContent = message.text;
+      if (status.textContent !== (message.status || '')) status.textContent = message.status || '';
+    }
+  };
   const recent = state.dialogueHistory.slice(-2);
-  recentDialogue.innerHTML = recent.map(dialogueMarkup).join('');
-  dialogueHistoryList.innerHTML = state.dialogueHistory.map(dialogueMarkup).join('');
+  updateList(recentDialogue, recent);
+  if (dialogueHistory.classList.contains('is-open')) updateList(dialogueHistoryList, state.dialogueHistory);
   languagePanel.hidden = recent.length === 0;
   openDialogueHistory.hidden = state.dialogueHistory.length <= 2;
-}
-
-function removeDialogueMessage(index) {
-  if (!Number.isInteger(index) || index < 0 || index >= state.dialogueHistory.length) return false;
-  state.dialogueHistory.splice(index, 1);
-  for (const key of ['streamingLumaIndex', 'streamingUserIndex', 'pendingUserIndex']) {
-    if (state[key] === index) state[key] = null;
-    else if (Number.isInteger(state[key]) && state[key] > index) state[key] -= 1;
-  }
-  if (state.lastFinalizedUser?.index === index) state.lastFinalizedUser = null;
-  else if (Number.isInteger(state.lastFinalizedUser?.index) && state.lastFinalizedUser.index > index) {
-    state.lastFinalizedUser.index -= 1;
-  }
-  renderDialogue();
-  return true;
 }
 
 function addDialogueMessage(speaker, text, name = '') {
   const clean = String(text || '').trim();
   if (!clean) return null;
-  state.dialogueHistory.push({ speaker, name, text: clean });
+  state.dialogueHistory.push({ id: ++state.messageSerial, revision: 1, speaker, name, text: clean });
   const index = state.dialogueHistory.length - 1;
   if (speaker === 'user') state.pendingUserIndex = index;
   renderDialogue();
@@ -976,90 +894,43 @@ function latestCharacterText() {
   return [...state.dialogueHistory].reverse().find((message) => message.speaker === 'luma')?.text || '';
 }
 
-function updateLumaDialogue(text, done = false) {
-  const clean = String(text || '').trim();
-  if (!clean) return;
-  state.currentSpeech = clean;
-  if (!state.nudgeInFlight) state.activeQuestion = clean;
-  if (state.streamingLumaIndex === null) {
-    const lastIndex = state.dialogueHistory.length - 1;
-    const lastMessage = state.dialogueHistory[lastIndex];
-    state.streamingLumaIndex = lastMessage?.speaker === 'luma' && normalizedSpeech(lastMessage.text) === normalizedSpeech(clean)
-      ? lastIndex
-      : addDialogueMessage('luma', clean, currentTask().speaker || 'Luma');
-  } else if (state.dialogueHistory[state.streamingLumaIndex]) {
-    state.dialogueHistory[state.streamingLumaIndex].text = clean;
-    renderDialogue();
-  }
-  if (done) {
-    state.streamingLumaIndex = null;
-    state.characterTurnId += 1;
-    markGoalHeard();
-  }
-}
-
-function clearCharacterCaptionReveal({ complete = false, interrupted = false } = {}) {
-  clearTimeout(state.captionRevealTimer);
-  state.captionRevealTimer = null;
-  const messageIndex = state.streamingLumaIndex;
-  const message = state.dialogueHistory[messageIndex];
+function clearCharacterCaptionReveal({ complete = false } = {}) {
+  clearTimeout(state.captionRevealTimer); state.captionRevealTimer = null;
+  const message = state.dialogueHistory[state.streamingLumaIndex];
   if (complete && message?.speaker === 'luma' && state.captionCharacters.length) {
-    message.text = state.captionCharacters.join('');
-    renderDialogue();
-  } else if (interrupted && message?.speaker === 'luma') {
-    // A canceled voice line is not a completed message. Keeping fragments such
-    // as “Yes. Yo…” in history made the dialogue look duplicated and broken.
-    removeDialogueMessage(messageIndex);
+    message.text = state.captionCharacters.join(''); renderDialogue();
   }
-  state.captionCharacters = [];
-  state.captionVisibleCount = 0;
-  state.streamingLumaIndex = null;
+  state.captionCharacters = []; state.captionVisibleCount = 0;
+  state.captionAudioStart = 0; state.streamingLumaIndex = null;
 }
 
 function beginCharacterCaptionReveal(text) {
   const clean = String(text || '').trim();
   if (!clean) return;
-  clearCharacterCaptionReveal({ interrupted: true });
-  state.currentSpeech = clean;
-  if (!state.nudgeInFlight) state.activeQuestion = clean;
+  clearCharacterCaptionReveal();
+  state.currentSpeech = clean; state.activeQuestion = clean;
   state.captionCharacters = Array.from(clean);
-  state.captionVisibleCount = 1;
-  state.streamingLumaIndex = addDialogueMessage('luma', state.captionCharacters[0], currentTask().speaker || 'Luma');
+  state.streamingLumaIndex = addDialogueMessage('luma', '…', currentTask().speaker || 'Luma');
   state.characterTurnId += 1;
-  markGoalHeard();
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    const message = state.dialogueHistory[state.streamingLumaIndex];
-    if (message) message.text = clean;
-    renderDialogue();
-    return;
-  }
-  const revealNext = () => {
-    const message = state.dialogueHistory[state.streamingLumaIndex];
-    if (!message || state.captionVisibleCount >= state.captionCharacters.length) {
-      state.captionRevealTimer = null;
-      return;
+  const generation = state.playbackGeneration;
+  const reveal = () => {
+    if (generation !== state.playbackGeneration) return;
+    const message = state.dialogueHistory[state.streamingLumaIndex], context = state.duplexPlayerContext;
+    if (!message) return;
+    if (context && state.captionAudioStart && context.currentTime >= state.captionAudioStart) {
+      const elapsed = context.currentTime - state.captionAudioStart;
+      const duration = Math.max(.1, state.duplexNextPlayTime - state.captionAudioStart);
+      const count = state.duplexOutputDone
+        ? Math.floor(state.captionCharacters.length * Math.min(1, elapsed / duration))
+        : Math.min(state.captionCharacters.length - 1, Math.floor(elapsed * 14));
+      state.captionVisibleCount = Math.max(state.captionVisibleCount, count);
+      message.text = state.captionCharacters.slice(0, state.captionVisibleCount).join('') || '…';
+      if (!state.questionReadyAt) markGoalHeard();
+      renderDialogue();
     }
-    const nextCharacter = state.captionCharacters[state.captionVisibleCount];
-    state.captionVisibleCount += 1;
-    message.text = state.captionCharacters.slice(0, state.captionVisibleCount).join('');
-    renderDialogue();
-    const delay = /[.!?,]/.test(nextCharacter) ? 170 : /\s/.test(nextCharacter) ? 34 : 78;
-    state.captionRevealTimer = setTimeout(revealNext, delay);
+    state.captionRevealTimer = setTimeout(reveal, 65);
   };
-  state.captionRevealTimer = setTimeout(revealNext, 70);
-}
-
-function updateUserDialogue(text, done = false) {
-  const clean = String(text || '').trim();
-  if (!clean) return;
-  if (state.streamingUserIndex === null) {
-    state.streamingUserIndex = addDialogueMessage('user', clean);
-  } else if (state.dialogueHistory[state.streamingUserIndex]) {
-    state.dialogueHistory[state.streamingUserIndex].text = clean;
-    state.pendingUserIndex = state.streamingUserIndex;
-    renderDialogue();
-  }
-  if (done) state.streamingUserIndex = null;
+  reveal();
 }
 
 function clearIdleNudge() {
@@ -1076,7 +947,7 @@ function scheduleIdleNudge() {
   const nudgeWhenQuiet = () => {
     const liveTask = currentTask();
     const stillMissing = (taskNeedsSpeech(liveTask) && !state.speechDone) || (taskNeedsAction(liveTask) && !state.actionDone);
-    if (!state.sceneStarted || !stillMissing || ['complete', 'task-complete'].includes(state.stage)) return;
+    if (!state.sceneStarted || state.micMuted || !stillMissing || ['complete', 'task-complete'].includes(state.stage)) return;
     if (isConversationTurnPending()) {
       state.idleNudgeTimer = setTimeout(nudgeWhenQuiet, 1200);
       return;
@@ -1100,23 +971,14 @@ function fallbackMeaningFeedback(answer, taskId) {
 }
 
 function applyDynamicFeedback(feedback = {}, context = {}) {
-  const index = context.userIndex ?? state.pendingUserIndex;
-  const message = state.dialogueHistory[index];
-  if (!message || message.speaker !== 'user') return;
-  const sameTask = state.selectedScene === context.sceneId
-    && currentTask().id === context.taskId
-    && state.taskIndex === context.taskIndex
-    && state.stage === 'active';
-  const actionAcknowledged = sameTask && isActionAcknowledgement(currentTask(), message.text, context.question);
-  const completesSpeech = sameTask
-    && !actionAcknowledged
-    && (responseCompletesTaskSpeech(currentTask(), message.text, context.question) || feedback.meaning_valid === true);
-
-  // Dialogue is never graded in the UI. This observer only records evidence
-  // for the task that was active when the learner started this utterance.
-  renderDialogue();
-  if (state.pendingUserIndex === index) state.pendingUserIndex = null;
-  if (!sameTask || !completesSpeech) return;
+  const message = state.dialogueHistory.find(item => item.id === context.messageId);
+  if (!message || message.speaker !== 'user' || !message.final
+    || message.revision !== context.revision || message.text !== context.answer
+    || context.practiceSession !== state.practiceSession) return;
+  const sameTask = state.selectedScene === context.sceneId && currentTask().id === context.taskId
+    && state.taskIndex === context.taskIndex && state.stage === 'active';
+  if (!sameTask || feedback.meaning_valid !== true) return;
+  if (isActionAcknowledgement(currentTask(), message.text, context.question)) return;
   state.lastTranscript = message.text;
   state.speechDone = true;
   markGoalSpoken(message.text);
@@ -1130,36 +992,29 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
 }
 
 async function requestLanguageFeedback(question, answer, turnContext = {}) {
-  const context = {
-    sceneId: state.selectedScene,
-    taskId: currentTask().id,
-    taskIndex: state.taskIndex,
-    userIndex: state.pendingUserIndex,
-    ...turnContext,
-  };
-  const localFeedback = fallbackMeaningFeedback(answer, context.taskId);
-  if (isActionAcknowledgement(currentTask(), answer, context.question)) localFeedback.meaning_valid = true;
-  if (localFeedback.meaning_valid) {
-    applyDynamicFeedback(localFeedback, context);
-    return;
-  }
+  const context = { ...captureUserTurnContext(), ...turnContext, question, answer };
+  if (!context.final || context.practiceSession !== state.practiceSession) return;
+  const controller = new AbortController();
+  state.pendingFeedback.add(controller);
+  const timer = setTimeout(() => controller.abort(), 6500);
   try {
     const response = await fetch('/api/feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: context.question || question, answer, sceneId: context.sceneId, taskId: context.taskId }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, answer, sceneId: context.sceneId, taskId: context.taskId }),
+      signal: controller.signal,
     });
     if (!response.ok) throw new Error('feedback_unavailable');
-    const feedback = await response.json();
-    applyDynamicFeedback(feedback, context);
+    applyDynamicFeedback(await response.json(), context);
   } catch {
-    if (!localFeedback.meaning_valid) applyDynamicFeedback(localFeedback, context);
-  }
+    applyDynamicFeedback(fallbackMeaningFeedback(answer, context.taskId), context);
+  } finally { clearTimeout(timer); state.pendingFeedback.delete(controller); }
 }
 
 function openDialogueHistoryPanel() {
   dialogueHistory.classList.add('is-open');
   dialogueHistory.setAttribute('aria-hidden', 'false');
+  renderDialogue();
+  dialogueHistoryList.scrollTop = dialogueHistoryList.scrollHeight;
 }
 
 function closeDialogueHistoryPanel() {
@@ -1402,28 +1257,16 @@ function clearCharacterTurnWatchdog() {
   state.characterWatchdogTimer = null;
 }
 
-function armCharacterTurnWatchdog(delayMs = 1600, quietThresholdMs = 1350) {
+function armCharacterTurnWatchdog(delayMs = 8000) {
   clearCharacterTurnWatchdog();
-  const taskId = currentTask().id;
+  const generation = state.playbackGeneration;
   state.characterWatchdogTimer = setTimeout(() => {
-    state.characterWatchdogTimer = null;
-    if (!state.sceneStarted || currentTask().id !== taskId || !state.duplexSpeaking || state.duplexOutputDone) return;
+    if (generation !== state.playbackGeneration || !state.duplexSpeaking || state.duplexOutputDone) return;
     const quietFor = Date.now() - state.lastDuplexAudioAt;
-    if (quietFor < quietThresholdMs) {
-      armCharacterTurnWatchdog(quietThresholdMs - quietFor, quietThresholdMs);
-      return;
-    }
-    // Some realtime sessions omit their final audio/done event. The local
-    // audio stream going quiet is enough evidence to hand the turn back.
-    scene.dataset.voiceRecovery = 'audio-idle-handoff';
-    state.duplexOutputDone = true;
-    if (!state.duplexSubtitleReady) publishDuplexSubtitle();
-    if (state.duplexSubtitleReady && state.duplexAcceptAudio) {
-      finishDuplexAudioOutput();
-      return;
-    }
+    if (quietFor < 8000 || isConversationPlaybackActive()) { armCharacterTurnWatchdog(1000); return; }
     settleFailedDuplexTurn();
-  }, Math.max(120, delayMs));
+    showToast('声音暂时中断，可以继续说或点重听。');
+  }, delayMs);
 }
 
 function clearUserTurn() {
@@ -1432,57 +1275,34 @@ function clearUserTurn() {
   state.userTurnActive = false;
 }
 
-function markUserTurnActive() {
-  clearTimeout(state.userTurnTimer);
-  state.userTurnActive = true;
-  state.userTurnTimer = setTimeout(clearUserTurn, 1800);
-}
-
 function armReplyTimeout() {
   clearReplyTimeout();
+  const expectedId = state.expectedResponse?.id;
   state.replyTimer = setTimeout(() => {
-    state.replyTimer = null;
-    if (!state.awaitingModelReply || isConversationPlaybackActive()) return;
-    state.awaitingModelReply = false;
-    retireExpectedResponse();
-    if (state.duplexReady) sendDuplex({ type: 'response.cancel' });
-    state.duplexResponseText = '';
-    state.duplexPendingSubtitle = '';
-    state.duplexValidatedText = false;
-    const after = state.duplexAfter;
-    state.duplexAfter = null;
-    showToast('这次回应超时了，情境会继续，不用重来', 3000);
-    after?.();
-    openLearnerTurn();
-  }, 7000);
+    if (state.expectedResponse?.id !== expectedId || isConversationPlaybackActive()) return;
+    settleFailedDuplexTurn();
+    showToast('这次没接上，我们继续。也可以点重听。', 3000);
+  }, 10000);
 }
 
 function stopDuplexPlayback({ cancel = true } = {}) {
-  clearCharacterTurnWatchdog();
-  clearCharacterCaptionReveal({ interrupted: true });
-  clearTimeout(state.duplexFinishTimer);
-  clearTimeout(state.duplexAudioGateTimer);
-  state.duplexFinishTimer = null;
-  state.duplexAudioGateTimer = null;
-  state.duplexPendingAudio = [];
-  state.duplexSubtitleReady = false;
-  state.duplexSources.forEach((source) => { try { source.stop(); } catch {} });
-  state.duplexSources.clear();
-  state.duplexNextPlayTime = 0;
+  state.playbackGeneration += 1;
+  clearCharacterTurnWatchdog(); clearCharacterCaptionReveal();
+  clearTimeout(state.firstPacketTimer); state.firstPacketTimer = null;
+  clearTimeout(state.duplexFinishTimer); state.duplexFinishTimer = null;
+  clearTimeout(state.duplexAudioGateTimer); state.duplexAudioGateTimer = null;
+  state.duplexPendingAudio = []; state.duplexSubtitleReady = false;
+  state.duplexSources.forEach(source => { try { source.stop(); } catch {} });
+  state.duplexSources.clear(); state.duplexNextPlayTime = 0;
   state.duplexAudioQueue = Promise.resolve();
-  state.duplexSpeaking = false;
-  state.duplexOutputDone = false;
+  state.duplexSpeaking = false; state.duplexOutputDone = false;
   if (cancel) {
-    state.duplexAcceptAudio = false;
-    retireExpectedResponse();
-    state.duplexResponseText = '';
-    state.duplexPendingSubtitle = '';
-    state.duplexResponseIsPrompt = false;
-    state.duplexValidatedText = false;
-    state.streamingLumaIndex = null;
+    state.duplexAcceptAudio = false; retireExpectedResponse();
+    state.duplexResponseText = ''; state.duplexPendingSubtitle = '';
+    state.duplexResponseIsPrompt = false; state.duplexValidatedText = false;
+    state.duplexAfter = null;
+    if (state.duplexReady) sendDuplex({ type: 'response.cancel' });
   }
-  if (cancel) state.duplexAfter = null;
-  if (cancel && state.duplexReady) sendDuplex({ type: 'response.cancel' });
 }
 
 function isDuplexPlaybackActive() {
@@ -1521,50 +1341,23 @@ function scheduledCharacterLineBlocked() {
 }
 
 function settleFailedDuplexTurn() {
-  const interruptedTurn = state.activeVoiceTurn;
-  const interruptedUserIndex = state.streamingUserIndex;
-  const interruptedUserMessage = state.dialogueHistory[state.streamingUserIndex];
-  clearCharacterCaptionReveal({ interrupted: true });
-  clearCharacterTurnWatchdog();
-  clearReplyTimeout();
-  clearUserTurn();
-  state.awaitingPrompt = false;
-  state.awaitingModelReply = false;
-  state.userTurnActive = false;
-  retireExpectedResponse();
-  clearLocalSpeechTurn();
-  state.duplexAcceptAudio = false;
-  state.duplexResponseText = '';
-  state.duplexPendingSubtitle = '';
-  state.duplexResponseIsPrompt = false;
-  state.duplexValidatedText = false;
-  state.duplexTranscript = '';
-  if (interruptedTurn?.continuationText && Number.isInteger(interruptedUserIndex) && interruptedUserMessage) {
-    interruptedUserMessage.text = interruptedTurn.continuationText;
-    renderDialogue();
-  } else if (Number.isInteger(interruptedUserIndex) && interruptedUserIndex >= 0 && interruptedUserMessage) {
-    removeDialogueMessage(interruptedUserIndex);
-  }
-  const after = state.duplexAfter;
-  state.duplexAfter = null;
-  after?.();
-  openLearnerTurn();
-  if (sceneVoiceIsOpen()) {
-    setTimeout(() => {
-      if (sceneVoiceIsOpen() && !state.duplexReady && !state.duplexConnectPromise) {
-        connectDuplexSession().catch(() => {});
-      }
-    }, 900);
-  }
+  const turn = state.activeVoiceTurn;
+  const message = state.dialogueHistory.find(item => item.id === turn?.messageId);
+  if (message && !message.final) { message.status = '识别未完成'; renderDialogue(); }
+  stopSpeechPlayback(); clearUserTurn(); clearLocalSpeechTurn();
+  state.duplexTranscript = ''; state.nudgeInFlight = false;
+  openLearnerTurn(); scheduleIdleNudge(); syncVoiceStatus();
 }
 
 function finishDuplexTurnWhenAudioEnds() {
+  const generation = state.playbackGeneration;
   clearCharacterTurnWatchdog();
   clearTimeout(state.duplexFinishTimer);
   const context = state.duplexPlayerContext;
   const remaining = context ? Math.max(0, state.duplexNextPlayTime - context.currentTime) : 0;
   state.duplexFinishTimer = setTimeout(() => {
-    if (!state.duplexOutputDone) return;
+    if (generation !== state.playbackGeneration || !state.duplexOutputDone) return;
+    state.lastCharacterEndedAt = Date.now();
     clearCharacterCaptionReveal({ complete: true });
     state.duplexSpeaking = false;
     clearCharacterTurnWatchdog();
@@ -1603,39 +1396,30 @@ function finishDuplexTurnWhenAudioEnds() {
   }, remaining * 1000 + 160);
 }
 
-async function enqueueDuplexPcm(base64) {
-  if (!base64) return;
+async function enqueueDuplexPcm(base64, generation = state.playbackGeneration) {
+  if (!base64 || generation !== state.playbackGeneration) return;
   const context = unlockDuplexPlayback();
   await context.resume();
+  if (generation !== state.playbackGeneration) return;
   if (!state.duplexPlayerGain) {
     state.duplexPlayerGain = context.createGain();
-    state.duplexPlayerGain.gain.value = 0.58;
-    state.duplexPlayerGain.connect(context.destination);
+    state.duplexPlayerGain.gain.value = .58; state.duplexPlayerGain.connect(context.destination);
   }
-  const raw = atob(base64);
-  const samples = Math.floor(raw.length / 2);
-  const buffer = context.createBuffer(1, samples, 24000);
-  const channel = buffer.getChannelData(0);
+  const raw = atob(base64), samples = Math.floor(raw.length / 2);
+  if (!samples) return;
+  const buffer = context.createBuffer(1, samples, 24000), channel = buffer.getChannelData(0);
   for (let index = 0; index < samples; index += 1) {
     let value = raw.charCodeAt(index * 2) | (raw.charCodeAt(index * 2 + 1) << 8);
     if (value & 0x8000) value -= 0x10000;
     channel[index] = value / 32768;
   }
-  const source = context.createBufferSource();
-  source.buffer = buffer;
-  source.connect(state.duplexPlayerGain);
+  if (generation !== state.playbackGeneration) return;
+  const source = context.createBufferSource(); source.buffer = buffer; source.connect(state.duplexPlayerGain);
   const startAt = Math.max(context.currentTime + .025, state.duplexNextPlayTime || 0);
+  if (!state.captionAudioStart) state.captionAudioStart = startAt;
+  state.duplexNextPlayTime = startAt + buffer.duration; state.duplexSources.add(source);
+  source.onended = () => { state.duplexSources.delete(source); };
   source.start(startAt);
-  state.duplexNextPlayTime = startAt + buffer.duration;
-  state.duplexSources.add(source);
-  source.onended = () => {
-    state.duplexSources.delete(source);
-    if (!state.duplexSources.size && state.duplexSpeaking && state.duplexSubtitleReady && !state.duplexOutputDone) {
-      // Local playback is the authoritative end of the character's turn.
-      // A short debounce still allows a late audio packet to extend the line.
-      armCharacterTurnWatchdog(260, 220);
-    }
-  };
 }
 
 function unlockDuplexPlayback() {
@@ -1649,8 +1433,11 @@ function unlockDuplexPlayback() {
 
 function queueDuplexAudio(audio) {
   if (!audio) return;
+  const generation = state.playbackGeneration;
   scene.dataset.audioChunks = String(Number(scene.dataset.audioChunks || 0) + 1);
-  state.duplexAudioQueue = state.duplexAudioQueue.then(() => enqueueDuplexPcm(audio)).catch(() => {});
+  state.duplexAudioQueue = state.duplexAudioQueue.then(() => enqueueDuplexPcm(audio, generation)).catch(() => {
+    if (generation === state.playbackGeneration) settleFailedDuplexTurn();
+  });
 }
 
 function releaseDuplexAudioGate() {
@@ -1664,7 +1451,7 @@ function releaseDuplexAudioGate() {
 
 function publishDuplexSubtitle() {
   const reply = state.duplexPendingSubtitle.trim();
-  if (!state.duplexValidatedText || !reply || !state.duplexSpeaking || state.userTranscriptPending) return false;
+  if (!state.duplexValidatedText || !reply || !state.duplexSpeaking) return false;
   state.duplexPendingSubtitle = '';
   if (state.pendingPostActionQuestion && state.actionDone && !state.speechDone && /\?\s*$/.test(reply)) {
     clearTimeout(state.postActionQuestionTimer);
@@ -1680,9 +1467,10 @@ function publishDuplexSubtitle() {
 
 async function finishDuplexAudioOutput() {
   if (!state.duplexOutputDone || !state.duplexSubtitleReady || !state.duplexAcceptAudio) return;
+  const generation = state.playbackGeneration;
   state.duplexAcceptAudio = false;
   await state.duplexAudioQueue;
-  finishDuplexTurnWhenAudioEnds();
+  if (generation === state.playbackGeneration) finishDuplexTurnWhenAudioEnds();
 }
 
 function extractDuplexText(event) {
@@ -1698,14 +1486,14 @@ function extractDuplexText(event) {
 }
 
 function looksLikeReasoningLeak(value) {
-  const text = String(value || '').trim();
-  if (!text) return false;
-  return /^\(/.test(text)
-    || /\b(wait,?\s+no|the learner said|the rule|the instruction|let'?s check|should i|pre-a1|current goal|hidden reasoning)\b/i.test(text);
+  return /<(?:think|analysis)>|^(?:analysis|system prompt|hidden reasoning)\s*:/i.test(String(value || '').trim());
 }
 
 function asksForCompletedAction(value) {
-  return state.actionDone && isActionRequestLine(value);
+  const task = currentTask(), text = normalizedSpeech(value);
+  if (!state.actionDone || !taskNeedsAction(task) || /\b(means?|meaning|word|say)\b/.test(text)) return false;
+  const object = task.id === 'gate-a12' ? 'a12' : task.id === 'office-signin' ? 'screen' : task.id;
+  return isActionRequestLine(value) && text.includes(object);
 }
 
 function transitionReplyReplacement(value) {
@@ -1721,13 +1509,13 @@ function safeCharacterReply() {
   if (state.actionDone && !state.speechDone) {
     const afterActionQuestions = {
       apple: 'Thank you. What is it?',
-      milk: 'Yes. What did you find?',
-      plate: 'Yes. What did you find?',
-      cup: 'Yes. What did you touch?',
-      spoon: 'Yes. What did you find?',
-      ticket: 'Thank you. What can you say?',
-      'gate-a12': 'Yes. What did you find?',
-      'office-signin': 'Thank you. What can you say?',
+      milk: 'What is it?',
+      plate: 'What is it?',
+      cup: 'What is it?',
+      spoon: 'What is it?',
+      ticket: 'Your ticket?',
+      'gate-a12': 'What is it?',
+      'office-signin': 'All done?',
     };
     return afterActionQuestions[currentTask().id] || 'Thank you.';
   }
@@ -1783,7 +1571,9 @@ function discardReasoningLeak(fallbackReply = '', { retrySafe = true } = {}) {
     return;
   }
   state.safeVoiceRetries += 1;
+  const requestId = state.speechRequestSerial, session = state.practiceSession;
   setTimeout(() => {
+    if (requestId !== state.speechRequestSerial || session !== state.practiceSession) return;
     state.suppressDuplexResponse = false;
     speak(reply, { after });
   }, 140);
@@ -1792,251 +1582,145 @@ function discardReasoningLeak(fallbackReply = '', { retrySafe = true } = {}) {
 function connectDuplexSession() {
   if (state.duplexReady) return Promise.resolve(true);
   if (state.duplexConnectPromise) return state.duplexConnectPromise;
-  state.duplexConnectPromise = new Promise((resolve, reject) => {
-    state.duplexConnectResolve = resolve;
-    state.duplexConnectReject = reject;
-  });
+  const generation = ++state.connectionGeneration;
+  transcriptLedger.reset();
+  clearLocalSpeechTurn();
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
   const socket = new WebSocket(`${scheme}://${location.host}/api/duplex`);
   state.duplexSocket = socket;
-  socket.binaryType = 'arraybuffer';
-  const connectionWatchdog = setTimeout(() => {
-    if (state.duplexSocket !== socket || state.duplexReady) return;
-    state.duplexConnectReject?.(new Error('duplex_connection_timeout'));
-    state.duplexConnectReject = null;
-    state.duplexConnectPromise = null;
-    state.duplexSocket = null;
-    try { socket.close(); } catch {}
-    settleFailedDuplexTurn();
-  }, 4200);
-  socket.onopen = () => sendDuplex({
-    type: 'start',
-    taskId: currentTask().id,
-    actionDone: state.actionDone,
-    speechDone: state.speechDone,
-    coveredGoals: [...state.coveredGoals],
-    flowState: state.stage,
+  const promise = new Promise((resolve, reject) => {
+    state.duplexConnectResolve = resolve; state.duplexConnectReject = reject;
   });
+  state.duplexConnectPromise = promise;
+  const current = () => state.duplexSocket === socket && generation === state.connectionGeneration;
+  const fail = (message) => {
+    if (!current()) return;
+    clearTimeout(connectionWatchdog);
+    state.duplexConnectReject?.(new Error(message));
+    state.duplexConnectResolve = null; state.duplexConnectReject = null;
+    state.duplexConnectPromise = null; state.duplexReady = false; state.duplexSocket = null;
+    try { socket.close(); } catch {}
+    settleFailedDuplexTurn(); syncVoiceStatus();
+  };
+  const connectionWatchdog = setTimeout(() => fail('connection_timeout'), 15000);
+  socket.onopen = () => {
+    if (!current()) return;
+    sendDuplex({ type: 'start', taskId: currentTask().id, actionDone: state.actionDone,
+      speechDone: state.speechDone, coveredGoals: [...state.coveredGoals], flowState: state.stage,
+      speechRate: preferences.speechRate, history: state.dialogueHistory.filter(m => m.final || m.speaker === 'luma').slice(-12).map(m => ({ role: m.speaker === 'user' ? 'user' : 'assistant', text: m.text })) });
+  };
   socket.onmessage = async (message) => {
+    if (!current()) return;
     let event;
     try { event = JSON.parse(message.data); } catch { return; }
     scene.dataset.lastDuplexEvent = event.type || 'unknown';
     scene.dataset.lastDuplexEventAt = String(Date.now());
     if (event.type === 'session.created') {
-      clearTimeout(connectionWatchdog);
-      state.duplexReady = true;
+      clearTimeout(connectionWatchdog); state.duplexReady = true;
       state.duplexConnectResolve?.(true);
-      state.duplexConnectResolve = null;
-      state.duplexConnectReject = null;
-      if (state.sceneStarted && state.stage === 'active' && state.awaitingPrompt && !state.characterPromptDelivered) {
-        clearTimeout(state.promptTimer);
-        state.promptTimer = null;
-        speak(currentTask().prompt);
-      }
+      state.duplexConnectResolve = null; state.duplexConnectReject = null;
+      state.duplexConnectPromise = null;
+      flushMicrophoneBuffer(); syncVoiceStatus();
       return;
     }
     if (event.type === 'input_audio_buffer.speech_started') {
-      if (isConversationPlaybackActive() && Date.now() - state.lastBargeInEnergyAt >= 900) return;
       state.lastServerSpeechAt = Date.now();
       state.pendingServerTurnContext = captureUserTurnContext();
-      if (!beginLocalSpeechTurn({ contextOverride: state.pendingServerTurnContext }) && state.voicePhase !== 'recording') return;
-      setTurnPhase(TURN_PHASE.LISTENING, '正在听你说', 'is-listening');
+      beginLocalSpeechTurn({ contextOverride: state.pendingServerTurnContext });
       return;
     }
     if (event.type === 'conversation.item.input_audio_transcription.started') {
-      if (!acceptTranscriptEvent(event, { allowStart: true })) return;
-      clearUserTurn();
-      armVoiceTurnWatchdog();
-      state.transcriptionStartedAt = Date.now();
-      state.suppressDuplexResponse = false;
-      state.userTranscriptPending = true;
-      if (!state.duplexTranscript) state.duplexTranscript = '';
-      if (!Number.isInteger(state.streamingUserIndex) || !state.dialogueHistory[state.streamingUserIndex]) {
-        state.streamingUserIndex = null;
-      }
-      if (state.streamingUserIndex === null) state.streamingUserIndex = addDialogueMessage('user', '…');
-      setTurnPhase(TURN_PHASE.LISTENING, '正在听你说', 'is-listening');
+      const turn = acceptTranscriptEvent(event, { allowStart: true });
+      if (turn) armVoiceTurnWatchdog();
       return;
     }
     if (event.type === 'conversation.item.input_audio_transcription.delta'
       || event.type === 'conversation.item.input_audio_transcription.result') {
-      if (!acceptTranscriptEvent(event)) return;
+      const turn = acceptTranscriptEvent(event);
       const text = extractDuplexText(event);
-      if (!text) return;
-      clearIdleNudge();
-      markUserTurnActive();
-      state.idleNudgeCount = 0;
-      // Seeduplex transcription updates are cumulative hypotheses even when
-      // the event is named `delta`. Always replace the same bubble with the
-      // newest hypothesis; appending creates duplicated/tripled captions when
-      // punctuation or casing changes between updates.
-      state.duplexTranscript = transcriptForActiveTurn(text);
-      updateUserDialogue(state.duplexTranscript);
-      armVoiceTurnWatchdog();
+      if (!turn || !VoiceRuntime.isSpeechText(text)) return;
+      confirmLearnerTurn(turn, text);
+      if (!turn.confirmed) return;
+      updateLearnerTurn(turn, text);
+      if (state.activeVoiceTurn === turn) { state.duplexTranscript = text; armVoiceTurnWatchdog(); }
       return;
     }
     if (event.type === 'conversation.item.input_audio_transcription.completed') {
-      if (!acceptTranscriptEvent(event)) return;
-      clearUserTurn();
-      const transcript = (extractDuplexText(event) || state.duplexTranscript).trim();
-      const passiveTurn = Boolean(state.activeVoiceTurn?.passive);
-      const turnContext = state.activeVoiceTurn?.context || state.userTurnContext || captureUserTurnContext();
-      const transcriptIndex = state.streamingUserIndex;
-      finalizeLearnerTranscript(transcript, { passiveTurn, turnContext, transcriptIndex });
+      const turn = acceptTranscriptEvent(event);
+      if (turn) finalizeLearnerTranscript(extractDuplexText(event) || turn.text, { turn });
       return;
     }
     if (event.type === 'conversation.item.input_audio_transcription.failed') {
-      if (!acceptTranscriptEvent(event)) return;
-      const transcriptIndex = state.streamingUserIndex;
-      finalizeLearnerTranscript('', { transcriptIndex });
-      showToast('这次没听清，请继续说', 2200);
+      const turn = acceptTranscriptEvent(event);
+      if (turn) finalizeLearnerTranscript('', { turn });
       return;
     }
     if (event.type === 'response.output_text.delta') {
-      if (!acceptResponseEvent(event)) return;
-      if (state.suppressDuplexResponse) return;
-      if (!state.duplexResponseText) {
-        state.duplexValidatedText = false;
-        state.duplexPendingSubtitle = '';
-      }
+      if (!acceptResponseEvent(event) || state.suppressDuplexResponse) return;
       state.duplexResponseText += extractDuplexText(event);
-      if (looksLikeReasoningLeak(state.duplexResponseText)) {
-        discardReasoningLeak();
-        return;
-      }
       return;
     }
     if (event.type === 'response.output_text.done') {
-      if (!acceptResponseEvent(event)) return;
+      if (!acceptResponseEvent(event) || state.suppressDuplexResponse) return;
       const reply = (extractDuplexText(event) || state.duplexResponseText).trim();
       state.duplexResponseText = '';
-      if (state.suppressDuplexResponse) return;
-      if (looksLikeReasoningLeak(reply)) {
-        discardReasoningLeak();
-        return;
-      }
-      if (asksForCompletedAction(reply)) {
-        discardReasoningLeak(safeCharacterReply());
-        return;
-      }
+      if (looksLikeReasoningLeak(reply)) { discardReasoningLeak(); return; }
+      if (asksForCompletedAction(reply)) { discardReasoningLeak(safeCharacterReply()); return; }
       const replacement = transitionReplyReplacement(reply);
-      if (replacement) {
-        discardReasoningLeak(replacement);
-        return;
-      }
-      if (reply) {
-        state.duplexValidatedText = true;
-        state.duplexPendingSubtitle = reply;
-        publishDuplexSubtitle();
-      }
-      else state.streamingLumaIndex = null;
+      if (replacement) { discardReasoningLeak(replacement); return; }
+      if (reply) { state.duplexValidatedText = true; state.duplexPendingSubtitle = reply; publishDuplexSubtitle(); }
       return;
     }
     if (event.type === 'response.output_audio.started') {
-      if (!acceptResponseEvent(event)) return;
-      if (state.suppressDuplexResponse) return;
-      if (state.expectedResponse) state.expectedResponse.audioStarted = true;
-      if (state.userTranscriptPending && state.duplexTranscript.trim() && state.activeVoiceTurn) {
-        scene.dataset.voiceRecovery = 'response-started';
-        finalizeLearnerTranscript(state.duplexTranscript, {
-          passiveTurn: Boolean(state.activeVoiceTurn.passive),
-          turnContext: state.activeVoiceTurn.context || state.userTurnContext || captureUserTurnContext(),
-          transcriptIndex: state.streamingUserIndex,
-        });
+      if (!acceptResponseEvent(event) || state.suppressDuplexResponse) return;
+      const expected = state.expectedResponse;
+      expected.audioStarted = true;
+      const turn = [...transcriptLedger.items.values()].find(item => item.id === expected.turnId);
+      if (turn) {
+        turn.responseStarted = true;
+        // Release the speaking floor, but keep the item for final ASR updates.
+        if (state.activeVoiceTurn === turn) clearLocalSpeechTurn();
       }
-      clearIdleNudge();
-      clearReplyTimeout();
-      clearTimeout(state.promptTimer);
-      state.promptTimer = null;
-      if (isConversationPlaybackActive()) {
-        clearTimeout(state.duplexFinishTimer);
-        state.duplexFinishTimer = null;
-      } else stopDuplexPlayback({ cancel: false });
-      state.duplexSpeaking = true;
-      setVoicePhase('character');
-      state.lumaStartedAt = Date.now();
-      state.lastDuplexAudioAt = state.lumaStartedAt;
-      armCharacterTurnWatchdog(2500);
-      state.duplexOutputDone = false;
-      state.duplexAcceptAudio = true;
-      state.duplexPendingAudio = [];
-      state.duplexSubtitleReady = false;
-      state.duplexResponseIsPrompt = state.awaitingPrompt;
-      clearTimeout(state.duplexAudioGateTimer);
-      state.duplexAudioGateTimer = null;
-      state.awaitingPrompt = false;
-      setTurnPhase(TURN_PHASE.CHARACTER_SPEAKING, `${currentTask().speaker || 'Luma'} 正在说 · 可以直接开口`, 'is-speaking');
-      if (state.sceneStarted && !state.handsFreeListening && !state.micMuted) startHandsFreeListening().catch(() => {});
+      clearIdleNudge(); clearReplyTimeout();
+      clearTimeout(state.firstPacketTimer); state.firstPacketTimer = null;
+      clearTimeout(state.promptTimer); state.promptTimer = null;
+      if (!isConversationPlaybackActive()) stopDuplexPlayback({ cancel: false });
+      else { clearTimeout(state.duplexFinishTimer); state.duplexFinishTimer = null; }
+      state.duplexSpeaking = true; setVoicePhase('character');
+      state.lumaStartedAt = Date.now(); state.lastDuplexAudioAt = state.lumaStartedAt;
+      armCharacterTurnWatchdog();
+      state.duplexOutputDone = false; state.duplexAcceptAudio = true;
+      state.duplexPendingAudio = []; state.duplexSubtitleReady = false;
+      state.duplexResponseIsPrompt = state.awaitingPrompt; state.awaitingPrompt = false;
+      setTurnPhase(TURN_PHASE.CHARACTER_SPEAKING, '正在说 · 你可以开口', 'is-speaking');
+      publishDuplexSubtitle();
       return;
     }
     if (event.type === 'response.output_audio.delta') {
-      if (!acceptResponseEvent(event)) return;
-      if (!state.duplexAcceptAudio) return;
+      if (!acceptResponseEvent(event) || !state.duplexAcceptAudio) return;
       const audio = event.audio || event.delta || '';
-      if (audio) {
-        state.lastDuplexAudioAt = Date.now();
-        armCharacterTurnWatchdog();
-      }
-      if (audio && !state.duplexSubtitleReady) publishDuplexSubtitle();
+      if (audio) { state.lastDuplexAudioAt = Date.now(); armCharacterTurnWatchdog(); }
+      if (!state.duplexSubtitleReady) publishDuplexSubtitle();
       if (state.duplexSubtitleReady) queueDuplexAudio(audio);
       else if (audio) state.duplexPendingAudio.push(audio);
       return;
     }
     if (event.type === 'response.output_audio.done') {
-      if (!acceptResponseEvent(event)) return;
-      if (!state.duplexAcceptAudio) return;
-      clearCharacterTurnWatchdog();
-      state.duplexOutputDone = true;
+      if (!acceptResponseEvent(event) || !state.duplexAcceptAudio) return;
+      clearCharacterTurnWatchdog(); state.duplexOutputDone = true;
       if (!state.duplexSubtitleReady) {
-        if (state.userTranscriptPending) return;
-        clearTimeout(state.duplexAudioGateTimer);
         state.duplexAudioGateTimer = setTimeout(() => {
-          state.duplexAudioGateTimer = null;
-          if (!state.duplexSubtitleReady) discardReasoningLeak(state.duplexResponseIsPrompt ? currentTask().prompt : '');
-        }, 1600);
-        return;
-      }
-      finishDuplexAudioOutput();
+          if (current() && !state.duplexSubtitleReady) settleFailedDuplexTurn();
+        }, 4000);
+      } else finishDuplexAudioOutput();
       return;
     }
-    if (event.type === 'response.done') {
-      // This provider event has no response or question id, so it cannot be
-      // safely assigned after a cancellation. Audio done and the local audio
-      // watchdog are the authoritative end-of-turn signals.
-      return;
-    }
-    if (event.type === 'response.canceled') {
-      return;
-    }
-    if (event.type === 'error' || event.type === 'local.error' || event.type === 'local.closed') {
-      clearTimeout(connectionWatchdog);
-      state.duplexReady = false;
-      state.duplexConnectReject?.(new Error(event.message || 'duplex_unavailable'));
-      state.duplexConnectReject = null;
-      state.duplexConnectPromise = null;
-      if (state.duplexSocket === socket) state.duplexSocket = null;
-      try { socket.close(); } catch {}
-      settleFailedDuplexTurn();
-      if (event.type !== 'local.closed') showToast('语音正在自动重连', 2600);
-    }
+    // Unidentified done/canceled events cannot retire a newer response.
+    if (['error', 'local.error', 'local.closed'].includes(event.type)) fail(event.message || 'voice_unavailable');
   };
-  socket.onerror = () => {
-    if (state.duplexSocket !== socket) return;
-    clearTimeout(connectionWatchdog);
-    state.duplexReady = false;
-    state.duplexConnectReject?.(new Error('duplex_socket_error'));
-    state.duplexConnectPromise = null;
-    settleFailedDuplexTurn();
-  };
-  socket.onclose = () => {
-    if (state.duplexSocket !== socket) return;
-    clearTimeout(connectionWatchdog);
-    state.duplexReady = false;
-    state.duplexSocket = null;
-    state.duplexConnectPromise = null;
-    settleFailedDuplexTurn();
-  };
-  return state.duplexConnectPromise;
+  socket.onerror = () => fail('socket_error');
+  socket.onclose = () => fail('socket_closed');
+  return promise;
 }
 
 function updateDuplexTask({ force = false } = {}) {
@@ -2053,6 +1737,7 @@ function updateDuplexTask({ force = false } = {}) {
     speechDone: state.speechDone,
     coveredGoals: [...state.coveredGoals],
     flowState: state.stage,
+    speechRate: preferences.speechRate,
   });
 }
 
@@ -2066,20 +1751,22 @@ function flushDuplexTaskUpdate() {
     speechDone: state.speechDone,
     coveredGoals: [...state.coveredGoals],
     flowState: state.stage,
+    speechRate: preferences.speechRate,
   });
 }
 
 function closeDuplexSession() {
-  if (state.duplexSocket?.readyState === WebSocket.OPEN) sendDuplex({ type: 'close' });
-  try { state.duplexSocket?.close(); } catch {}
-  state.duplexSocket = null;
-  state.duplexReady = false;
-  state.duplexConnectPromise = null;
-  stopDuplexPlayback({ cancel: false });
-  setVoicePhase('idle');
+  const socket = state.duplexSocket;
+  state.connectionGeneration += 1;
+  state.duplexSocket = null; state.duplexReady = false;
+  state.duplexConnectReject?.(new Error('session_closed'));
+  state.duplexConnectReject = null; state.duplexConnectResolve = null; state.duplexConnectPromise = null;
+  try { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'close' })); socket?.close(); } catch {}
+  stopSpeechPlayback(); setVoicePhase('idle');
 }
 
 function stopSpeechPlayback() {
+  state.speechRequestSerial += 1;
   clearReplyTimeout();
   stopDuplexPlayback();
   state.awaitingPrompt = false;
@@ -2088,43 +1775,27 @@ function stopSpeechPlayback() {
 }
 
 async function speak(text, { after, prompt = true } = {}) {
-  const cleanText = String(text || '').trim();
-  if (!cleanText) {
-    state.awaitingPrompt = false;
-    after?.();
-    return;
-  }
-  claimExclusiveVoiceSession();
-  unlockDuplexPlayback();
-  stopSpeechPlayback();
-  setVoicePhase('character');
+  const clean = String(text || '').trim();
+  if (!clean) { after?.(); return false; }
+  claimExclusiveVoiceSession(); unlockDuplexPlayback(); stopSpeechPlayback();
+  const requestId = ++state.speechRequestSerial, session = state.practiceSession;
   if (state.sceneStarted && state.stage === 'active') state.awaitingPrompt = Boolean(prompt);
+  if (!state.duplexReady) { try { await connectDuplexSession(); } catch {} }
+  if (requestId !== state.speechRequestSerial || session !== state.practiceSession) return false;
   if (!state.duplexReady) {
-    try {
-      await Promise.race([
-        connectDuplexSession(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('duplex_timeout')), 2200)),
-      ]);
-    } catch {}
+    state.awaitingPrompt = false; openLearnerTurn(); scheduleIdleNudge();
+    showToast('语音还没连上，可以先打字或稍后重听。'); after?.(); return false;
   }
-  if (state.duplexReady) {
-    state.duplexAfter = after || null;
-    // This endpoint returns the requested character line as audio only. Put
-    // the known subtitle on screen first, then let the audio gate release.
-    state.duplexResponseText = '';
-    state.duplexPendingSubtitle = cleanText;
-    state.duplexValidatedText = true;
-    beginExpectedResponse('say');
-    if (state.sceneStarted) setMode(`${currentTask().speaker || 'Luma'} 正在回应`, 'is-speaking');
-    sendDuplex({ type: 'say', text: cleanText });
-    return true;
-  }
-  state.awaitingPrompt = false;
-  setVoicePhase('listening');
-  openLearnerTurn();
-  showToast('这句话没有播放，点左下角重听', 3000);
-  after?.();
-  return false;
+  state.duplexAfter = after || null; state.duplexResponseText = '';
+  state.duplexPendingSubtitle = clean; state.duplexValidatedText = true;
+  const expected = beginExpectedResponse('say');
+  state.firstPacketTimer = setTimeout(() => {
+    if (state.expectedResponse?.id !== expected.id || expected.audioStarted) return;
+    settleFailedDuplexTurn();
+    showToast('这句话没有播放，可以点重听或继续说。');
+  }, 10000);
+  setVoicePhase('character'); sendDuplex({ type: 'say', text: clean });
+  return true;
 }
 
 function emphasizeCurrentAction() {
@@ -2137,12 +1808,11 @@ function emphasizeCurrentAction() {
 
 function characterHintLine(level = 1) {
   const task = currentTask();
-  if (taskNeedsAction(task) && !state.actionDone && (level === 1 || state.speechDone)) return task.actionPrompt || task.prompt;
-  if (task.question && state.actionDone && !state.speechDone && level === 1) return task.question;
+  if (taskNeedsAction(task) && !state.actionDone && level === 1) return task.actionPrompt || task.prompt;
   const support = speechSupportForTask(task);
-  if (level === 1) return 'One word is okay.';
-  if (level === 2) return `You can start: ${support.starter}`;
-  return `You can say: ${support.model}`;
+  if (level === 1) return task.question && state.actionDone ? task.question : 'One word is okay.';
+  if (level === 2) return `Try: ${support.starter}`;
+  return `Say: ${support.model}`;
 }
 
 function queuePostActionQuestion() {
@@ -2219,24 +1889,20 @@ function syncActionCoach() {
 }
 
 function speechSupportForTask(task = currentTask()) {
-  const namingApple = task.id === 'apple' && state.actionDone;
-  const support = {
-    apple: namingApple
-      ? { meaning: '她在问这个东西是什么。', starter: "It's an …", model: "It's an apple." }
-      : { meaning: '她想让你把苹果递给她，可以边递边回应。', starter: 'Here …', model: 'Here you are.' },
-    milk: { meaning: '告诉她你找到了牛奶。', starter: 'I found …', model: 'I found the milk.' },
-    plate: { meaning: '告诉她盘子在哪里。', starter: 'The plate is …', model: 'The plate is on the table.' },
-    cup: { meaning: '告诉她你碰到的是杯子。', starter: 'I touched …', model: 'I touched the cup.' },
-    spoon: { meaning: '告诉她你找到了勺子。', starter: 'I found …', model: 'I found the spoon.' },
-    bag: { meaning: '她在确认这是不是你的包。', starter: 'Yes, it … / No, it …', model: 'Yes, it is.' },
-    'office-purpose': { meaning: '前台在问你来见谁。', starter: "I'm here to see …", model: "I'm here to see Maya." },
-    'office-greeting': { meaning: 'Maya 在和你打招呼。', starter: 'Nice to …', model: 'Nice to meet you too.' },
-  }[task.id];
-  return support || {
-    meaning: '先表达你听懂的核心意思，不必一次说得很完整。',
-    starter: task.answer ? `${task.answer} …` : 'Yes …',
-    model: task.natural?.[0] || 'Okay.',
+  const supports = {
+    apple: { meaning: '这是苹果。', starter: 'An…', model: 'An apple.' },
+    milk: { meaning: '这是牛奶。', starter: 'M…', model: 'Milk.' },
+    plate: { meaning: '这是盘子。', starter: 'A…', model: 'A plate.' },
+    cup: { meaning: '这是杯子。', starter: 'A…', model: 'A cup.' },
+    spoon: { meaning: '这是勺子。', starter: 'A…', model: 'A spoon.' },
+    ticket: { meaning: '给你。', starter: 'Here…', model: 'Here you are.' },
+    bag: { meaning: '这是你的包吗？', starter: 'Yes…', model: 'Yes.' },
+    'gate-a12': { meaning: '指出登机口。', starter: 'A…', model: 'A12.' },
+    'office-purpose': { meaning: '说出你想见的人。', starter: 'M…', model: 'Maya.' },
+    'office-signin': { meaning: '签好了。', starter: 'I…', model: 'I signed in.' },
+    'office-greeting': { meaning: '打个招呼就好。', starter: 'Hi…', model: 'Hi, Maya.' },
   };
+  return supports[task.id] || { meaning: '说一个词也可以。', starter: 'Yes…', model: 'Yes.' };
 }
 
 function showAppToast(message, duration = 2400) {
@@ -2271,6 +1937,7 @@ function handleSetting(button) {
   if (button.dataset.setting === 'speech-rate') {
     preferences.speechRate = preferences.speechRate === '慢速' ? '正常' : '慢速';
     localStorage.setItem('luma-speech-rate', preferences.speechRate);
+    updateDuplexTask({ force: true });
     syncSettingsUi();
     showAppToast(`语音速度已切换为${preferences.speechRate}`);
     return;
@@ -2288,28 +1955,14 @@ function handleSetting(button) {
 
 function scheduleTaskPrompt(taskId, initialDelay) {
   clearTimeout(state.promptTimer);
-  let quietSince = 0;
-  const deliverWhenQuiet = () => {
-    if (state.stage !== 'active' || currentTask().id !== taskId || !state.awaitingPrompt) {
-      state.promptTimer = null;
-      return;
-    }
-    if (scheduledCharacterLineBlocked()) {
-      quietSince = 0;
-      state.promptTimer = setTimeout(deliverWhenQuiet, 180);
-      return;
-    }
-    if (!quietSince) quietSince = Date.now();
-    const dwell = DialogueRules.transitionDwell(latestCharacterText(), { normal: 520, afterQuestion: 12000 });
-    const remaining = dwell - (Date.now() - quietSince);
-    if (remaining > 0) {
-      state.promptTimer = setTimeout(deliverWhenQuiet, Math.min(180, remaining));
-      return;
-    }
+  const session = state.practiceSession;
+  const deliver = () => {
+    if (session !== state.practiceSession || state.stage !== 'active' || currentTask().id !== taskId || !state.awaitingPrompt) return;
+    if (scheduledCharacterLineBlocked()) { state.promptTimer = setTimeout(deliver, 180); return; }
     state.promptTimer = null;
     speak(currentTask().prompt);
   };
-  state.promptTimer = setTimeout(deliverWhenQuiet, initialDelay);
+  state.promptTimer = setTimeout(deliver, initialDelay);
 }
 
 function startTask(index, { speakAgain = true } = {}) {
@@ -2399,6 +2052,12 @@ function startTask(index, { speakAgain = true } = {}) {
 }
 
 function resetScene({ speakAgain = true } = {}) {
+  state.practiceSession += 1;
+  state.pendingFeedback.forEach(controller => controller.abort());
+  state.pendingFeedback.clear();
+  transcriptLedger.reset();
+  microphoneBuffer.clear();
+  closeDuplexSession();
   state.dialogueHistory = [];
   state.coveredGoals = new Set();
   state.sessionGoals = {};
@@ -2450,6 +2109,11 @@ function startScene({ subtitlesHidden = false } = {}) {
 }
 
 function leaveScene({ keepVoice = false } = {}) {
+  state.practiceSession += 1;
+  state.pendingFeedback.forEach(controller => controller.abort());
+  state.pendingFeedback.clear();
+  textAnswerForm.hidden = true;
+  scene.classList.remove('is-typing');
   stopVoiceHealthMonitor();
   clearIdleNudge();
   clearReviewTransition();
@@ -2545,9 +2209,9 @@ function completeHotspotAction(objectName) {
   if (task.question) queuePostActionQuestion();
   else if (!isConversationTurnPending()) {
     const followUp = {
-      ticket: 'Thank you. What can you say?',
-      'gate-a12': 'Yes. What did you find?',
-      'office-signin': 'Thank you. What can you say?',
+      ticket: 'Your ticket?',
+      'gate-a12': 'What is it?',
+      'office-signin': 'All done?',
     }[task.id];
     if (followUp) speakCharacterCue(followUp);
   }
@@ -2781,25 +2445,21 @@ function scheduleReview() {
 
 async function finishSpeakingAnswer(transcript) {
   const clean = String(transcript || '').trim();
-  if (!clean || !state.sceneStarted) return;
-  if (isDuplexPlaybackActive()) stopDuplexPlayback({ cancel: true });
-  else if (isConversationPlaybackActive()) stopSpeechPlayback();
-  const turnContext = state.userTurnContext || captureUserTurnContext();
-  state.pendingUserIndex = addDialogueMessage('user', clean);
+  if (!clean || !state.sceneStarted) return false;
+  if (!state.duplexReady) {
+    showToast('正在连接，文字还在输入框里，请稍后发送。');
+    connectDuplexSession().catch(() => {}); return false;
+  }
+  stopSpeechPlayback();
+  const context = captureUserTurnContext();
+  const index = addDialogueMessage('user', clean), message = state.dialogueHistory[index];
+  message.final = true;
+  beginExpectedResponse('text');
   state.awaitingModelReply = true;
-  state.suppressDuplexResponse = false;
-  setTurnPhase(TURN_PHASE.CHARACTER_SPEAKING, `${currentTask().speaker || 'Luma'} 正在回应 · 仍可继续说`);
-  if (state.stage === 'active') requestLanguageFeedback(turnContext.question, clean, turnContext);
-  state.userTurnContext = null;
-  if (state.duplexReady) {
-    beginExpectedResponse('text');
-    armReplyTimeout();
-    sendDuplex({ type: 'user.text', text: clean });
-  }
-  else {
-    state.awaitingModelReply = false;
-    showToast('实时语音暂时未连接，已先判断你的表达');
-  }
+  armReplyTimeout();
+  sendDuplex({ type: 'user.text', text: clean });
+  requestLanguageFeedback(context.question, clean, { ...context, messageId: message.id, revision: message.revision, final: true });
+  return true;
 }
 
 function completeMultimodalTask({ waitForDuplexReply = false } = {}) {
@@ -2853,13 +2513,12 @@ function cleanupSpeechCaptureUi() {
 }
 
 function disconnectAudioCapture() {
+  if (state.audioProcessor?.port) state.audioProcessor.port.onmessage = null;
   if (state.audioProcessor) state.audioProcessor.onaudioprocess = null;
-  try { state.audioSource?.disconnect(); } catch {}
-  try { state.audioProcessor?.disconnect(); } catch {}
-  try { state.audioSink?.disconnect(); } catch {}
-  state.audioSource = null;
-  state.audioProcessor = null;
-  state.audioSink = null;
+  for (const node of [state.audioSource, state.audioFilter, state.audioProcessor, state.audioSink]) {
+    try { node?.disconnect(); } catch {}
+  }
+  state.audioSource = null; state.audioFilter = null; state.audioProcessor = null; state.audioSink = null;
 }
 
 function releaseMicrophoneStream(stream = state.mediaStream) {
@@ -2872,178 +2531,148 @@ function releaseMicrophoneStream(stream = state.mediaStream) {
 }
 
 function cancelSpeechCapture() {
+  state.captureGeneration += 1;
   clearIdleNudge();
-  state.handsFreeListening = false;
-  state.micStarting = false;
-  disconnectAudioCapture();
-  releaseMicrophoneStream();
-  setVoicePhase('idle');
-  cleanupSpeechCaptureUi();
+  state.handsFreeListening = false; state.micStarting = false;
+  disconnectAudioCapture(); releaseMicrophoneStream();
+  microphoneBuffer.clear(); state.bufferOverflow = false;
+  setVoicePhase('idle'); cleanupSpeechCaptureUi();
 }
 
-function convertToPcm16(input, inputRate, outputRate = 16000) {
-  const ratio = inputRate / outputRate;
-  const length = Math.max(1, Math.round(input.length / ratio));
-  const pcm = new Int16Array(length);
-  for (let index = 0; index < length; index += 1) {
-    const start = Math.floor(index * ratio);
-    const end = Math.min(input.length, Math.floor((index + 1) * ratio));
-    let sum = 0;
-    for (let sample = start; sample < end; sample += 1) sum += input[sample];
-    const value = Math.max(-1, Math.min(1, sum / Math.max(1, end - start)));
-    pcm[index] = value < 0 ? value * 0x8000 : value * 0x7fff;
+function flushMicrophoneBuffer() {
+  const socket = state.duplexSocket;
+  if (!state.duplexReady || socket?.readyState !== WebSocket.OPEN || socket.bufferedAmount > 64000) return;
+  for (const pcm of microphoneBuffer.take()) {
+    socket.send(pcm.buffer);
+    scene.dataset.micPackets = String(Number(scene.dataset.micPackets || 0) + 1);
   }
-  return pcm;
+  if (state.bufferOverflow) {
+    state.bufferOverflow = false;
+    syncVoiceStatus();
+  }
 }
 
-async function getMicrophoneStream() {
+function syncMobileViewport() {
+  const viewport = window.visualViewport;
+  document.documentElement.style.setProperty('--app-height', `${viewport?.height || window.innerHeight}px`);
+  document.documentElement.style.setProperty('--viewport-top', `${viewport?.offsetTop || 0}px`);
+  updateSceneGeometry();
+}
+
+async function getMicrophoneStream(generation = state.captureGeneration) {
   const activeTrack = state.mediaStream?.getAudioTracks()[0];
   if (activeTrack?.readyState === 'live' && activeTrack.enabled && !activeTrack.muted) return state.mediaStream;
   releaseMicrophoneStream();
-  state.mediaStream = await navigator.mediaDevices.getUserMedia({
+  const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
-  return state.mediaStream;
+  if (generation !== state.captureGeneration || !state.sceneStarted || state.micMuted) {
+    stream.getTracks().forEach(track => track.stop());
+    return null;
+  }
+  state.mediaStream = stream;
+  return stream;
 }
 
 async function startHandsFreeListening() {
   if (!state.sceneStarted || state.handsFreeListening || state.micStarting) return;
   if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext) {
-    state.micMuted = true;
-    micButton.disabled = true;
-    micButton.setAttribute('aria-label', '当前浏览器不支持实时语音');
-    micLabel.textContent = '不可用';
-    showToast('当前浏览器不支持实时语音，请用支持麦克风的浏览器打开');
-    return;
+    state.micMuted = true; syncVoiceStatus();
+    showToast('当前浏览器无法收音，可以点“打字”继续。'); return;
   }
   claimExclusiveVoiceSession();
-  state.micStarting = true;
-  state.micMuted = false;
-  micButton.disabled = true;
-  micLabel.textContent = '连接中';
+  const generation = ++state.captureGeneration;
+  const valid = () => generation === state.captureGeneration && state.sceneStarted && !state.micMuted;
+  state.micStarting = true; state.micMuted = false;
+  micButton.disabled = true; syncVoiceStatus();
   try {
     connectDuplexSession().catch(() => {});
-    const stream = await getMicrophoneStream();
-    if (!state.sceneStarted) return;
-    const microphoneTrack = stream.getAudioTracks()[0];
-    if (microphoneTrack) {
-      const recoverLostMicrophone = () => {
-        if (!state.sceneStarted || state.micMuted || state.mediaStream !== stream || document.visibilityState !== 'visible') return;
-        state.handsFreeListening = false;
-        disconnectAudioCapture();
-        releaseMicrophoneStream(stream);
-        cleanupSpeechCaptureUi();
-        setMode('麦克风正在自动恢复');
-        setTimeout(ensureSceneVoiceIsOpen, 350);
-      };
-      microphoneTrack.onended = recoverLostMicrophone;
-      microphoneTrack.onmute = recoverLostMicrophone;
-      scene.dataset.micTrackState = microphoneTrack.readyState;
-      scene.dataset.micTrackMuted = String(microphoneTrack.muted);
-      scene.dataset.micTrackEnabled = String(microphoneTrack.enabled);
-    }
+    const stream = await getMicrophoneStream(generation);
+    if (!stream || !valid()) return;
     disconnectAudioCapture();
     state.audioContext ||= new AudioContext();
-    await state.audioContext.resume();
-    state.captureSampleRate = state.audioContext.sampleRate;
-    state.audioSource = state.audioContext.createMediaStreamSource(stream);
-    state.audioProcessor = state.audioContext.createScriptProcessor(2048, 1, 1);
-    state.audioSink = state.audioContext.createGain();
-    state.audioSink.gain.value = 0;
-    state.handsFreeListening = true;
-    state.micCalibrationUntil = Date.now() + 700;
-    state.lastMicFrameAt = Date.now();
-    state.audioProcessor.onaudioprocess = (audioEvent) => {
-      if (!sceneVoiceIsOpen()) return;
-      state.lastMicFrameAt = Date.now();
-      const input = audioEvent.inputBuffer.getChannelData(0);
-      const characterCanHear = isConversationPlaybackActive()
-        && Date.now() - state.lumaStartedAt > BARGE_IN_GUARD_MS;
-      let energy = 0;
-      for (let index = 0; index < input.length; index += 1) energy += input[index] * input[index];
-      const rms = Math.sqrt(energy / Math.max(1, input.length));
-      const calibrating = Date.now() < state.micCalibrationUntil;
-      if (!characterCanHear && rms < .04) {
-        const noiseBlend = calibrating ? .18 : state.activeVoiceTurn ? .004 : .018;
-        state.micNoiseFloor = state.micNoiseFloor * (1 - noiseBlend) + rms * noiseBlend;
-      }
-      const voiceThreshold = Math.min(.026, Math.max(.006, state.micNoiseFloor * 2.25));
-      scene.dataset.micRms = rms.toFixed(4);
-      scene.dataset.micThreshold = voiceThreshold.toFixed(4);
-      scene.dataset.micFrames = String(Number(scene.dataset.micFrames || 0) + 1);
-      if (calibrating) {
-        state.voiceFrameStreak = 0;
-      } else if (rms > voiceThreshold) {
-        const onsetThreshold = characterCanHear ? Math.max(.012, voiceThreshold * 1.7) : voiceThreshold * 1.05;
-        state.voiceFrameStreak = rms > onsetThreshold ? state.voiceFrameStreak + 1 : 0;
-        if (rms > onsetThreshold && (!characterCanHear || state.voiceFrameStreak >= 2)) {
-          state.lastVoiceEnergyAt = Date.now();
-          scene.dataset.lastVoiceAt = String(state.lastVoiceEnergyAt);
-          if (characterCanHear) state.lastBargeInEnergyAt = state.lastVoiceEnergyAt;
-        }
-        if (state.voiceFrameStreak >= 2) beginLocalSpeechTurn();
-      } else {
-        state.voiceFrameStreak = 0;
-      }
-      const pcm = convertToPcm16(input, state.captureSampleRate);
-      if (state.duplexReady
-        && state.duplexSocket?.readyState === WebSocket.OPEN) {
-        state.duplexSocket.send(pcm.buffer);
-        scene.dataset.micPackets = String(Number(scene.dataset.micPackets || 0) + 1);
-      }
-    };
-    state.audioSource.connect(state.audioProcessor);
-    state.audioProcessor.connect(state.audioSink);
-    state.audioSink.connect(state.audioContext.destination);
-    micButton.classList.add('is-live');
-    micButton.classList.remove('is-muted', 'is-held');
-    micButton.setAttribute('aria-pressed', 'true');
-    micButton.setAttribute('aria-label', '关闭麦克风');
-    micLabel.textContent = state.voicePhase === 'recording' ? '正在听' : '随时说';
-    if (!isDuplexPlaybackActive()) {
-      openLearnerTurn();
-      setMode('轮到你 · 可以开口');
+    const context = state.audioContext;
+    await context.resume();
+    if (!valid()) return;
+    if (context.audioWorklet && !state.audioWorkletLoaded) {
+      try { await context.audioWorklet.addModule('./microphone-worklet.js'); state.audioWorkletLoaded = true; } catch {}
     }
+    if (!valid()) return;
+    const resampler = new VoiceRuntime.PcmResampler(context.sampleRate);
+    const receive = input => {
+      if (!valid() || !sceneVoiceIsOpen()) return;
+      state.lastMicFrameAt = Date.now();
+      let sum = 0;
+      for (const sample of input) sum += sample * sample;
+      const rms = Math.sqrt(sum / Math.max(1, input.length));
+      scene.dataset.micRms = rms.toFixed(4);
+      scene.dataset.micFrames = String(Number(scene.dataset.micFrames || 0) + 1);
+      // Native echo cancellation/noise suppression clean audio. Volume is
+      // telemetry only; a door, keyboard or fan must never cancel the character.
+      if (rms > .008) state.lastVoiceEnergyAt = Date.now();
+      const pcm = resampler.push(input);
+      if (!pcm.length) return;
+      if (state.bufferOverflow) { flushMicrophoneBuffer(); return; }
+      if (!microphoneBuffer.push(pcm)) {
+        state.bufferOverflow = true;
+        showToast('连接中断太久，这段声音未发完。请等连接恢复后重说，或打字。', 4500);
+        syncVoiceStatus(); return;
+      }
+      flushMicrophoneBuffer();
+    };
+    state.audioSource = context.createMediaStreamSource(stream);
+    state.audioFilter = context.createBiquadFilter();
+    state.audioFilter.type = 'highpass'; state.audioFilter.frequency.value = 75; state.audioFilter.Q.value = .7;
+    if (state.audioWorkletLoaded) {
+      state.audioProcessor = new AudioWorkletNode(context, 'luma-microphone', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+      state.audioProcessor.port.onmessage = event => receive(event.data);
+    } else {
+      state.audioProcessor = context.createScriptProcessor(1024, 1, 1);
+      state.audioProcessor.onaudioprocess = event => receive(event.inputBuffer.getChannelData(0));
+    }
+    state.audioSink = context.createGain(); state.audioSink.gain.value = 0;
+    state.audioSource.connect(state.audioFilter);
+    state.audioFilter.connect(state.audioProcessor);
+    state.audioProcessor.connect(state.audioSink); state.audioSink.connect(context.destination);
+    state.handsFreeListening = true; state.lastMicFrameAt = Date.now();
+    const track = stream.getAudioTracks()[0];
+    track.onended = () => {
+      if (!valid()) return;
+      cancelSpeechCapture(); state.micMuted = false;
+      setTimeout(ensureSceneVoiceIsOpen, 300);
+    };
+    // Temporary OS mute is handled by the health monitor; do not stop a live
+    // track during a brief interruption from Safari or a phone notification.
+    micButton.classList.add('is-live'); micButton.classList.remove('is-muted', 'is-held');
+    micButton.setAttribute('aria-pressed', 'true'); micButton.setAttribute('aria-label', '关闭麦克风');
+    openLearnerTurn(); syncVoiceStatus();
   } catch (error) {
-    state.handsFreeListening = false;
-    state.micMuted = true;
-    disconnectAudioCapture();
-    micButton.classList.remove('is-live');
-    micButton.classList.add('is-muted');
-    micButton.setAttribute('aria-pressed', 'false');
-    micButton.setAttribute('aria-label', '重试语音识别');
-    micLabel.textContent = '重试语音';
-    showToast(error?.name === 'NotAllowedError' ? '允许一次麦克风权限后即可免按对话' : '麦克风暂时不可用，点麦克风重试', 3200);
+    if (!valid()) return;
+    state.handsFreeListening = false; state.micMuted = true;
+    disconnectAudioCapture(); releaseMicrophoneStream();
+    micButton.classList.remove('is-live'); micButton.classList.add('is-muted');
+    micButton.setAttribute('aria-pressed', 'false'); micButton.setAttribute('aria-label', '重试麦克风');
+    showToast(error?.name === 'NotAllowedError' ? '允许麦克风后可以说话；也可以点“打字”。' : '麦克风暂时不可用，可以重试或打字。', 3200);
+    syncVoiceStatus();
   } finally {
-    state.micStarting = false;
-    micButton.disabled = false;
+    if (generation === state.captureGeneration) { state.micStarting = false; micButton.disabled = false; }
   }
 }
 
 function pauseHandsFreeListening() {
-  if (!state.handsFreeListening) return;
-  state.handsFreeListening = false;
   state.micMuted = true;
-  setVoicePhase('idle');
-  disconnectAudioCapture();
-  releaseMicrophoneStream();
-  micButton.classList.remove('is-live');
-  micButton.classList.add('is-muted');
-  micButton.setAttribute('aria-pressed', 'false');
-  micButton.setAttribute('aria-label', '继续语音识别');
-  micLabel.textContent = '继续语音';
-  setMode('麦克风已静音');
-  showToast('已静音，点一下麦克风可继续对话');
+  cancelSpeechCapture();
+  const turn = state.activeVoiceTurn;
+  const message = state.dialogueHistory.find(item => item.id === turn?.messageId);
+  if (message && !message.final) { message.status = '麦克风已关闭'; renderDialogue(); }
+  clearLocalSpeechTurn();
+  micButton.disabled = false; micButton.setAttribute('aria-label', '继续语音识别');
+  setMode('麦克风已静音'); syncVoiceStatus();
 }
 
 function toggleHandsFreeListening(event) {
   event?.preventDefault?.();
-  if (state.stage === 'complete') {
-    if (isConversationTurnPending()) showToast('等人物把这一句说完，就会自然结束');
-    else scheduleReview();
-    return;
-  }
-  if (state.handsFreeListening) pauseHandsFreeListening();
+  if (state.handsFreeListening || state.micStarting) pauseHandsFreeListening();
   else startHandsFreeListening();
 }
 
@@ -3141,6 +2770,31 @@ syncSettingsUi();
 syncHomeProgressState();
 syncLearningUi();
 syncA11yState();
+
+
+textAnswerToggle.addEventListener('click', () => {
+  textAnswerForm.hidden = !textAnswerForm.hidden;
+  scene.classList.toggle('is-typing', !textAnswerForm.hidden);
+  textAnswerToggle.setAttribute('aria-expanded', String(!textAnswerForm.hidden));
+  if (!textAnswerForm.hidden) textAnswerInput.focus();
+  else textAnswerInput.blur();
+});
+textAnswerForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const text = textAnswerInput.value;
+  if (await finishSpeakingAnswer(text)) {
+    textAnswerInput.value = ''; textAnswerInput.blur(); textAnswerForm.hidden = true;
+    scene.classList.remove('is-typing'); textAnswerToggle.setAttribute('aria-expanded', 'false');
+  }
+});
+window.visualViewport?.addEventListener('resize', syncMobileViewport);
+window.visualViewport?.addEventListener('scroll', syncMobileViewport);
+window.addEventListener('resize', syncMobileViewport);
+window.addEventListener('pagehide', () => {
+  stopSpeechPlayback(); cancelSpeechCapture(); closeDuplexSession();
+});
+window.addEventListener('pageshow', () => { if (state.sceneStarted && !state.micMuted) ensureSceneVoiceIsOpen(); });
+syncMobileViewport();
 
 window.__lumaDemo = {
   openSheet,
