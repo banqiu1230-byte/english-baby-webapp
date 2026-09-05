@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      if (window.location.protocol === 'file:') window.location.replace('http://127.0.0.1:4174/');
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f7f7f5" />
+    <meta name="description" content="Luma：进入真实情境，通过观察、行动与开口自然习得英语。" />
+    <title>Luma · 在真实情境中学英语</title>
+    <link rel="preload" href="./assets/kitchen-mobile-neutral.png" as="image" />
+    <link rel="preload" href="./assets/apple.png" as="image" />
+    <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/regular/style.css" />
+    <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/fill/style.css" />
+    <link rel="stylesheet" href="./styles.css?v=40" />
+  </head>
+  <body>
+    <div class="app-frame" id="appFrame">
+      <main class="app-shell" id="appShell">
+        <section class="view view-home is-active" data-view="home" aria-label="首页">
+          <div class="view-scroll home-scroll">
+            <header class="home-header">
+              <div>
+                <h1>在真实场景中练英语口语</h1>
+              </div>
+              <button class="profile-avatar" type="button" data-nav="profile" aria-label="打开个人资料">
+                <img src="./assets/figma/raw-3.png" alt="Luma 角色头像" />
+                <span aria-hidden="true"></span>
+              </button>
+            </header>
+
+            <section class="daily-card" aria-labelledby="dailyTitle">
+              <img src="./assets/figma/raw-3.png" alt="清晨厨房里的 Luma" />
+              <div class="daily-scrim"></div>
+              <div class="daily-meta">
+                <span class="live-label">下一步 · 只听声音</span>
+                <p>家 · 清晨</p>
+                <h2 id="dailyTitle">帮 Luma 准备早餐</h2>
+                <div class="daily-tags">
+                  <span>听懂指令</span>
+                  <span>5 个连续任务</span>
+                </div>
+                <button class="primary-cta" type="button" data-open-scene="kitchen">
+                  无字幕再练 <i class="ph ph-arrow-right"></i>
+                </button>
+              </div>
+              <div class="daily-progress" aria-label="今日进度 1/5"><span></span></div>
+            </section>
+
+            <section class="section-block">
+              <div class="section-heading">
+                <div>
+                  <h2>换个地方，继续开口</h2>
+                </div>
+              </div>
+
+              <div class="filter-row" role="tablist" aria-label="环境分类">
+                <button class="filter-chip is-active" type="button" data-filter="all">全部</button>
+                <button class="filter-chip" type="button" data-filter="travel">出行</button>
+                <button class="filter-chip" type="button" data-filter="work">工作</button>
+                <button class="filter-chip" type="button" data-filter="social">社交</button>
+              </div>
+
+              <div class="scenario-rail" id="scenarioRail">
+                <button class="scenario-card" type="button" data-category="social" data-open-scene="kitchen">
+                  <img src="./assets/figma/raw-3.png" alt="家庭生活环境" />
+                  <span class="card-copy"><small>HOME · 3个地点</small><strong>家庭生活</strong></span>
+                </button>
+                <button class="scenario-card" type="button" data-category="social" data-preview="street">
+                  <img src="./assets/figma/raw-4.png" alt="城市街道环境" />
+                  <span class="card-copy"><small>CITY · 6 个地点</small><strong>城市街道</strong></span>
+                </button>
+                <button class="scenario-card" type="button" data-category="travel" data-open-scene="airport">
+                  <img src="./assets/figma/raw-6.png" alt="机场登机口环境" />
+                  <span class="card-copy"><small>TRAVEL · 3个地点</small><strong>机场登机口</strong></span>
+                </button>
+                <button class="scenario-card" type="button" data-category="work" data-open-scene="office">
+                  <img src="./assets/figma/raw-8.png" alt="工作环境" />
+                  <span class="card-copy"><small>WORK · 3个地点</small><strong>家庭生活</strong></span>
+                </button>
+              </div>
+            </section>
+
+            <section class="memory-card">
+              <div class="memory-icon"><i class="ph-fill ph-plant"></i></div>
+              <div><span class="overline">学习进度</span><h2>学会的表达，会在新场景再次出现。</h2><p><strong>give me</strong> 已在 1 个环境中出现。下次它会换一种方式回来。</p></div>
+              <button type="button" data-nav="growth" aria-label="查看成长记录"><i class="ph ph-caret-right"></i></button>
+            </section>
+          </div>
+        </section>
+
+        <section class="view view-world" data-view="world" aria-label="环境">
+          <div class="view-scroll page-scroll">
+            <header class="page-header world-header"><h1>场景学习</h1></header>
+            <div class="filter-row world-filter" role="tablist" aria-label="场景分类">
+              <button class="filter-chip is-active" type="button" data-filter="all">全部</button>
+              <button class="filter-chip" type="button" data-filter="travel">出行</button>
+              <button class="filter-chip" type="button" data-filter="work">工作</button>
+              <button class="filter-chip" type="button" data-filter="social">社交</button>
+            </div>
+            <div class="world-list">
+              <button class="world-feature is-available" type="button" data-category="social" data-open-scene="kitchen"><img src="./assets/figma/raw-3.png" alt="家庭生活环境" /><span class="world-copy"><small>HOME · 3个地点</small><strong>家庭生活</strong></span><i class="ph ph-arrow-right"></i></button>
+              <button class="world-feature" type="button" data-category="social" data-preview="street"><img src="./assets/figma/raw-4.png" alt="城市街道环境" /><span class="world-copy"><small>CITY · 6 个地点</small><strong>城市街道</strong></span><i class="ph ph-arrow-right"></i></button>
+              <button class="world-feature" type="button" data-category="travel" data-open-scene="airport"><img src="./assets/figma/raw-6.png" alt="机场登机口环境" /><span class="world-copy"><small>TRAVEL · 3个地点</small><strong>机场登机口</strong></span><i class="ph ph-arrow-right"></i></button>
+              <button class="world-feature is-available" type="button" data-category="work" data-open-scene="office"><img src="./assets/figma/raw-8.png" alt="工作环境" /><span class="world-copy"><small>WORK · 3个地点</small><strong>家庭生活</strong></span><i class="ph ph-arrow-right"></i></button>
+            </div>
+          </div>
+        </section>
+
+        <section class="view view-growth" data-view="growth" aria-label="成长">
+          <div class="view-scroll page-scroll">
+            <header class="page-header growth-header"><h1>你已经能听懂并开口</h1></header>
+            <section class="ability-card">
+              <div class="ability-orbit" id="abilityOrbit" aria-label="学习闭环完成度 18%"><span><b id="abilityPercent">18</b><small>%</small></span></div>
+              <div><small>本周学习闭环</small><h2 id="abilityTitle">开始建立声音和意义的连接</h2><p id="abilityDescription">你已经能在真实动作中理解 7 个表达。</p></div>
+            </section>
+            <section class="growth-section">
+              <div class="section-heading compact"><div><h2>现在能做什么</h2></div></div>
+              <div class="skill-list">
+                <article><span class="skill-icon hearing"><i class="ph ph-ear"></i></span><div><strong>听到后理解</strong><small id="growthHeard">7 个表达</small><span class="meter"><i id="growthHeardMeter" style="width:76%"></i></span></div></article>
+                <article><span class="skill-icon action"><i class="ph ph-hand-tap"></i></span><div><strong>理解后行动</strong><small id="growthActions">5 个动作</small><span class="meter"><i id="growthActionsMeter" style="width:68%"></i></span></div></article>
+                <article><span class="skill-icon speaking"><i class="ph ph-waveform"></i></span><div><strong>主动表达</strong><small id="growthSpoken">5 次有效回应</small><span class="meter"><i id="growthSpokenMeter" style="width:58%"></i></span></div></article>
+                <article><span class="skill-icon transfer"><i class="ph ph-arrows-split"></i></span><div><strong>跨环境迁移</strong><small id="growthTransfer">等待第二个环境</small><span class="meter"><i id="growthTransferMeter" style="width:8%"></i></span></div></article>
+              </div>
+            </section>
+            <section class="phrase-garden"><h2>最近学会的内容</h2><div class="phrase-cloud"><button type="button"><strong>apple</strong><small>能说出</small></button><button type="button"><strong>spoon</strong><small>能说出</small></button><button type="button"><strong>milk</strong><small>能听懂</small></button><button type="button"><strong>plate</strong><small>能听懂</small></button><button type="button"><strong>cup</strong><small>能听懂</small></button><button type="button"><strong>give me</strong><small>能听懂</small></button></div></section>
+          </div>
+        </section>
+
+        <section class="view view-profile" data-view="profile" aria-label="我的">
+          <div class="view-scroll page-scroll">
+            <header class="profile-header"><div class="large-avatar"><img src="./assets/figma/raw-3.png" alt="Luma 头像" /></div><h1>我的英语生活</h1><p>零基础 · 第 1 天</p></header>
+            <section class="profile-stats" aria-label="学习数据">
+              <article><small>听懂表达</small><strong id="profileHeard">7</strong><span>本周</span></article>
+              <article><small>完成动作</small><strong id="profileActions">5</strong><span>真实互动</span></article>
+              <article><small>主动开口</small><strong id="profileSpoken">5</strong><span>有效回应</span></article>
+            </section>
+            <div class="settings-list">
+              <button type="button" data-setting="speech-rate"><span><i class="ph ph-speaker-high"></i><strong>语音与语速</strong></span><em id="speechRateValue">慢速</em><i class="ph ph-arrows-clockwise"></i></button>
+              <button type="button" data-setting="rescue"><span><i class="ph ph-translate"></i><strong>中文救援层</strong></span><em id="rescueValue">按需显示</em><i class="ph ph-arrows-clockwise"></i></button>
+              <button type="button" data-setting="reminder"><span><i class="ph ph-bell"></i><strong>每日提醒</strong></span><em>网页暂不可用</em><i class="ph ph-info"></i></button>
+              <div class="settings-static"><span><i class="ph ph-shield-check"></i><strong>隐私与录音</strong></span><em>云端识别 · 不保存</em></div>
+            </div>
+          </div>
+        </section>
+
+        <nav class="bottom-nav" id="bottomNav" aria-label="主要导航">
+          <button class="is-active" type="button" data-nav="home"><i class="ph-fill ph-house"></i><span>首页</span></button>
+          <button type="button" data-nav="world"><i class="ph ph-globe-hemisphere-west"></i><span>场景</span></button>
+          <button type="button" data-nav="growth"><i class="ph ph-plant"></i><span>成长</span></button>
+          <button type="button" data-nav="profile"><i class="ph ph-user-circle"></i><span>我的</span></button>
+        </nav>
+
+        <div class="app-toast" id="appToast" role="status" aria-live="polite"></div>
+
+        <aside class="scene-sheet" id="sceneSheet" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="sheetTitle">
+          <button class="sheet-backdrop" type="button" data-close-sheet tabindex="-1" aria-label="关闭情境详情"></button>
+          <div class="sheet-panel">
+            <div class="sheet-handle"></div>
+            <div class="sheet-visual"><img id="sheetImage" src="./assets/kitchen-mobile-neutral.png" alt="情境预览" /><button class="sheet-close" type="button" data-close-sheet aria-label="关闭"><i class="ph ph-x"></i></button><span class="sheet-badge" id="sheetBadge">可进入</span></div>
+            <div class="sheet-content">
+              <span class="overline" id="sheetEyebrow">HOME · MORNING</span><h2 id="sheetTitle">帮 Luma 准备早餐</h2><p id="sheetDescription">先听懂她的需要，再通过真实动作和开口完成一件小事。</p>
+              <div class="sheet-people" id="sheetPeople"><span><i class="ph ph-user"></i> Luma</span><span><i class="ph ph-clock"></i> 3 分钟</span><span><i class="ph ph-sparkle"></i> 零基础</span></div>
+              <div class="sheet-goal"><i class="ph ph-target"></i><div><small>你将自然遇到</small><strong id="sheetGoal">give me · apple · thank you</strong></div></div>
+              <button class="sheet-cta" id="sheetCta" type="button">进入真实情境 <i class="ph ph-arrow-right"></i></button>
+            </div>
+          </div>
+        </aside>
+
+        <section class="experience" id="experience" aria-label="互动英语情境" aria-hidden="true">
+          <div class="scene" id="scene">
+            <div class="world" aria-hidden="true"><img class="background-blur" id="backgroundBlur" src="./assets/kitchen-mobile-neutral.png" alt="" draggable="false" /><img class="background-plane" id="backgroundPlane" src="./assets/kitchen-mobile-neutral.png" alt="" draggable="false" /><div class="sun-wash"></div><div class="dust" id="dust"></div><div class="companion-presence"></div></div>
+            <div class="object-layer"><div class="task-focus" id="taskFocus" aria-hidden="true"><span></span></div><div class="drop-zone" id="dropZone" aria-hidden="true"><span></span></div><button class="apple-object" id="apple" type="button" aria-label="红苹果。拖动并交给 Luma。"><span class="apple-aura"></span><img src="./assets/apple.png" alt="红苹果" draggable="false" /><span class="apple-shadow"></span></button><button class="scene-hotspot" type="button" data-object="milk" aria-label="牛奶"><span></span></button><button class="scene-hotspot" type="button" data-object="plate" aria-label="盘子"><span></span></button><button class="scene-hotspot" type="button" data-object="cup" aria-label="杯子"><span></span></button><button class="scene-hotspot" type="button" data-object="spoon" aria-label="勺子"><span></span></button></div>
+            <div class="foreground" aria-hidden="true"></div>
+            <header class="experience-topbar"><button type="button" id="exitScene" aria-label="退出情境"><i class="ph ph-arrow-left"></i></button><div class="scene-step" id="sceneProgress" role="progressbar" aria-label="场景学习进度" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"><span id="stepFill"></span></div><div class="mode-pill" id="modePill"><span class="mode-dot"></span><span id="modeLabel">准备开始</span></div><button class="subtitle-toggle" type="button" id="subtitleToggle" aria-label="隐藏字幕" aria-pressed="true" title="隐藏字幕"><i class="ph ph-closed-captioning"></i></button><button type="button" id="resetButton" aria-label="重新开始"><i class="ph ph-arrow-counter-clockwise"></i></button></header>
+            <div class="action-coach" id="actionCoach" role="status" hidden><i class="ph ph-hand-grabbing" aria-hidden="true"></i><span id="actionCoachText"></span></div>
+            <section class="language-panel" id="languagePanel" aria-live="polite" hidden><div class="recent-dialogue" id="recentDialogue"></div><button class="dialogue-history-button" id="openDialogueHistory" type="button">全部对话 <i class="ph ph-caret-up"></i></button></section>
+            <aside class="dialogue-history" id="dialogueHistory" aria-label="全部对话" aria-hidden="true"><button class="dialogue-history-backdrop" id="closeDialogueHistoryBackdrop" type="button" aria-label="关闭全部对话"></button><div class="dialogue-history-panel"><header><div><small>场景对话</small><h2>全部对话</h2></div><button id="closeDialogueHistory" type="button" aria-label="关闭全部对话"><i class="ph ph-x"></i></button></header><div class="dialogue-history-list" id="dialogueHistoryList"></div></div></aside>
+            <nav class="scene-controls" aria-label="情境控制"><button class="round-control" id="replayButton" type="button" aria-label="重新听一遍"><i class="ph ph-speaker-high"></i><span>重听</span></button><button class="mic-control" id="micButton" type="button" aria-label="打开麦克风" aria-pressed="false"><span class="mic-ripple"></span><i class="ph ph-microphone"></i><span id="micLabel">自动聆听</span></button><button class="round-control" id="helpButton" type="button" aria-label="获得提示"><i class="ph ph-lightbulb"></i><span>提示</span></button></nav>
+            <div class="toast" id="toast" role="status" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <section class="review-screen" id="reviewScreen" aria-label="情境回顾" aria-hidden="true">
+          <div class="completion-celebration" id="completionCelebration" aria-hidden="true"></div>
+          <div class="review-scroll">
+            <header class="review-hero"><button type="button" id="closeReview" aria-label="关闭回顾"><i class="ph ph-x"></i></button><span class="review-check"><i class="ph-fill ph-check-circle"></i></span><span class="overline">SCENE COMPLETE</span><h1>你不是背答案，<br /><em>你是在真实回应。</em></h1><p id="reviewSceneMeta">清晨厨房 · 5 个任务 · 6 分钟</p></header>
+            <div class="review-body">
+              <section class="review-summary"><article><i class="ph ph-ear"></i><strong>听懂</strong><span id="reviewHeard">5 条真实请求</span></article><article><i class="ph ph-hand-grabbing"></i><strong>行动</strong><span id="reviewActions">完成 5 个动作</span></article><article><i class="ph ph-waveform"></i><strong>表达</strong><span id="reviewSpoken">做出 5 次主动回应</span></article></section>
+              <section class="recast-card" id="reviewRecast"><span class="overline">YOUR REAL CONVERSATION</span><small>你实际说了</small><p id="reviewOriginal"></p><i class="ph ph-arrow-down" id="reviewRecastArrow"></i><small id="reviewRecastLabel">更合适的回应</small><strong id="reviewCorrected"></strong><button type="button" id="playRecast"><i class="ph ph-speaker-high"></i> 听这个表达</button></section>
+              <section class="transfer-card"><div><i class="ph-fill ph-plant"></i></div><span><small>下一次复现</small><strong id="reviewTransferTitle">这个表达会在另一个环境回来</strong><p id="reviewTransferCopy">系统会换一个真实情境，让你再次听懂并回应。</p></span></section>
+              <button class="review-primary" id="finishReview" type="button">回到今天 <i class="ph ph-arrow-right"></i></button><button class="review-secondary" id="repeatScene" type="button"><i class="ph ph-eye-slash"></i> 关闭字幕再练一次</button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="./dialogue-rules.js?v=3" defer></script>
+    <script src="./app.js?v=106" defer></script>
+  </body>
+</html>

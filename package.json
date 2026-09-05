@@ -1,0 +1,19 @@
+{
+  "name": "english-baby-webapp",
+  "version": "1.0.0",
+  "description": "Luma mobile-first situated English learning prototype",
+  "main": "app.js",
+  "scripts": {
+    "dev": "node server.js",
+    "check": "node --check dialogue-rules.js && node --check app.js && node --check server.js",
+    "test": "node --test dialogue-rules.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@phosphor-icons/web": "^2.1.1",
+    "ws": "^8.21.3"
+  }
+}
