@@ -7,7 +7,7 @@ const WebSocket = require('ws');
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 4174);
-const HOST = process.env.HOST || '127.0.0.1';
+const HOST = process.env.HOST || '0.0.0.0';
 const DUPLEX_URL = 'wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue';
 const ASR_HOTWORDS = [
   'apple', 'red apple', 'fresh apple', 'milk', 'plate', 'cup', 'spoon',

@@ -4,6 +4,7 @@
   "description": "Luma mobile-first situated English learning prototype",
   "main": "app.js",
   "scripts": {
+    "start": "node server.js",
     "dev": "node server.js",
     "check": "node --check dialogue-rules.js && node --check app.js && node --check server.js",
     "test": "node --test dialogue-rules.test.js"
