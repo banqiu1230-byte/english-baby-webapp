@@ -1948,3 +1948,57 @@ html { -webkit-text-size-adjust: 100%; }
 @media (pointer: coarse) {
   .background-plane, .object-layer { transform: none; }
 }
+
+/* Breakfast is one shared activity, with optional language support. */
+.breakfast-world { position: absolute; z-index: 8; pointer-events: none; }
+.breakfast-world[hidden], .breakfast-panel[hidden], .breakfast-cup[hidden], .cup-landing[hidden], .breakfast-choices[hidden], .scene-intro[hidden] { display: none; }
+.breakfast-cup { position: absolute; width: 22%; aspect-ratio: 1.15; padding: 0; border: 0; background: none; transform: translate(-50%, -50%); touch-action: none; pointer-events: auto; cursor: grab; filter: drop-shadow(3px 9px 4px #24140770); }
+.breakfast-cup:active { cursor: grabbing; }
+.cup-glass { position: absolute; inset: 0 20% 0 0; overflow: hidden; border: 2px solid #f2dfb999; border-top: 3px solid #f8e6c6; border-bottom: 5px solid #ddc79e; border-radius: 45% 45% 32% 32% / 14% 14% 15% 15%; background: linear-gradient(100deg, #ffffff66, #eee0bf15 22%, #f3d8b620 64%, #fff6d366 95%); box-shadow: inset 3px 0 3px #ffffff77, inset -3px 0 5px #734d2355; pointer-events: none; }
+.cup-glass::after { content: ''; position: absolute; inset: 7% 12% 12%; border-left: 2px solid #fff9df88; border-radius: 18%; }
+.cup-handle { position: absolute; right: 0; top: 22%; width: 34%; height: 58%; border: 5px solid #e6d6adad; border-left: 0; border-radius: 0 65% 65% 0; box-shadow: inset -1px 0 2px #fff3d3, 1px 1px 2px #593c2680; pointer-events: none; }
+.cup-liquid { position: absolute; bottom: 0; left: 0; right: 0; height: var(--fill, 0%); border-radius: 50% 50% 0 0 / 12% 12% 0 0; background: linear-gradient(100deg, #dce8da99, #d5d6bc55 45%, #ece5ca99); box-shadow: inset 0 3px 2px #fffbe3bb; transition: height 1s ease; }
+.breakfast-cup[data-drink="milk"] .cup-liquid { background: linear-gradient(100deg, #ead8ac, #fff3d3 45%, #d8c092); }
+@media (prefers-reduced-motion: reduce) { .cup-liquid { transition: none; } }
+.breakfast-cup:disabled { opacity: 1; cursor: default; pointer-events: none; }
+.breakfast-cup:focus-visible { outline: 2px solid white; outline-offset: 2px; border-radius: 50%; }
+.cup-landing { position: absolute; left: 50%; top: 40%; transform: translate(-50%,-50%); display: flex; gap: 6px; align-items: center; justify-content: center; min-height: 52px; padding: 10px 14px; border: 1px dashed #fff; border-radius: 28px; color: #fff; background: #090c14d9; pointer-events: auto; font-size: 13px; }
+.cup-landing i { font-size: 20px; }
+.breakfast-panel { position: absolute; z-index: 22; top: calc(76px + env(safe-area-inset-top)); left: 14px; right: 14px; padding: 12px 14px; border-radius: 20px; background: #fffaf2f5; color: #211b16; }
+.breakfast-heading { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.breakfast-heading h2 { font-size: 16px; margin: 0 0 5px; line-height: 1.3; font-weight: 600; }
+.breakfast-heading p { font-size: 11px; line-height: 1.5; margin: 0; color: #64503c; }
+.breakfast-heading button { flex-shrink: 0; min-height: 44px; padding: 6px; border: 0; background: transparent; color: #614725; font-size: 12px; }
+.breakfast-choices { display: flex; gap: 8px; margin-top: 10px; }
+.breakfast-choices button { flex: 1; min-height: 56px; border: 1px solid #d7c4aa; border-radius: 14px; background: white; color: #211b16; padding: 8px 10px; }
+.breakfast-choices strong, .breakfast-choices small { display: block; }
+.breakfast-choices strong { font-size: 15px; font-weight: 500; }.breakfast-choices small { font-size: 11px; margin-top: 3px; color: #675441; }
+.breakfast-outcome { margin: 8px 0 0; font-size: 13px; line-height: 1.5; }.breakfast-outcome:empty { display: none; }
+.breakfast-instruction { margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: #64503c; }
+#introPerson { margin-inline: .2em; }
+.scene[data-scene="kitchen"] .object-layer { visibility: hidden; }
+.scene[data-breakfast] .toast { top: calc(166px + env(safe-area-inset-top)); }
+.scene-intro { position: absolute; inset: 0; z-index: 32; display: flex; align-items: flex-end; padding: 20px 20px max(24px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent 20%, #090c1422 35%, #090c14ed 77%); color: white; overflow-y: auto; }
+.intro-content { width: 100%; padding-top: 48px; }
+.intro-greeting { font-size: 13px; color: #ffdc9c; }
+.intro-content h1 { font-size: 27px; font-weight: 600; margin: 10px 0 18px; line-height: 1.25; }
+.intro-content p { font-size: 17px; line-height: 1.7; margin: 0 0 12px; }
+.intro-content .intro-example { font-size: 14px; color: #e1e3e6; }
+.intro-ready { margin-top: 12px; width: 100%; display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 56px; padding: 12px 16px; border-radius: 28px; border: 0; background: #ffbc55; color: #241b0d; font-size: 16px; font-weight: 600; }
+.intro-remember { display: flex; align-items: center; gap: 9px; justify-content: center; min-height: 44px; margin-top: 8px; font-size: 13px; }
+.intro-remember input { width: 18px; height: 18px; accent-color: #ffbc55; }
+.intro-content > small { display: block; text-align: center; color: #cfd2d8; font-size: 11px; line-height: 1.6; }
+.intro-back { position: absolute; top: max(14px, env(safe-area-inset-top)); left: 14px; width: 44px; height: 44px; border: 0; border-radius: 50%; color: white; background: #090c14ba; font-size: 20px; }
+.scene.is-intro > :not(.world):not(.scene-intro) { visibility: hidden; }
+.scene.is-intro .world { filter: brightness(.9); }
+@media (max-height: 620px) {
+  .intro-content h1 { font-size: 23px; margin-bottom: 12px; }
+  .intro-content p { font-size: 15px; line-height: 1.5; }
+  .intro-content .intro-example { font-size: 13px; }
+  .intro-content { padding-top: 52px; }
+}
+@media (orientation: landscape) and (max-height: 540px) {
+  .intro-content { max-width: 420px; margin-left: auto; padding-top: 16px; }
+  .scene-intro { background: linear-gradient(90deg, transparent, #090c14ed 55%); padding-bottom: 14px; }
+  .breakfast-panel { left: auto; width: min(42%, 370px); }
+}

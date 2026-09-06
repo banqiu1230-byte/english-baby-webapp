@@ -78,13 +78,13 @@ const preferences = {
 
 const SCENES = {
   kitchen: {
-    image: './assets/kitchen-mobile-neutral.png',
+    image: './assets/breakfast/table.webp',
     badge: '可进入',
     eyebrow: 'HOME · MORNING',
     title: '帮 Luma 准备早餐',
-    description: '连续参与 5 个生活片段：可以边听边做、随时开口，说话和动作顺序不限。',
-    people: [['user', 'Luma'], ['clock', '6 分钟'], ['sparkle', '5 个任务']],
-    goal: 'apple · milk · plate · cup · spoon',
+    description: '和 Luma 一起准备早餐：选喜欢的饮料，递一个杯子，再告诉她要多少。一个词也能改变接下来发生的事。',
+    people: [['user', 'Luma'], ['clock', '3–5 分钟'], ['sparkle', '3 个生活片段']],
+    goal: 'milk or water · here · more · enough',
     available: true,
   },
   airport: {
@@ -119,43 +119,7 @@ const SCENES = {
   },
 };
 
-const KITCHEN_TASKS = [
-  {
-    id: 'apple', interaction: 'drag', requiresAction: true, prompt: 'Give me the apple, please.', translation: '把苹果递给我，好吗？',
-    actionSuccess: 'Thank you! You gave me the apple.', actionTranslation: '谢谢！你把苹果递给我了。',
-    question: 'What is it?', questionTranslation: '这是什么？', answer: 'apple',
-    spokenSuccess: 'Yes — an apple. You said it.', spokenTranslation: '对，是苹果。你已经说出来了。',
-    natural: ["It’s an apple.", 'That’s an apple.', 'I found an apple.'], actionPrompt: 'Good. Give me the apple.', hint: '把红苹果拖到 Luma 的手边。',
-  },
-  {
-    id: 'milk', interaction: 'tap', requiresAction: true, prompt: 'Find the milk.', translation: '你能找到牛奶吗？',
-    actionSuccess: 'Yes, that is the milk.', actionTranslation: '对，那是牛奶。',
-    question: 'What is it?', questionTranslation: '这是什么？', answer: 'milk',
-    spokenSuccess: 'Milk. You found the milk.', spokenTranslation: '牛奶。你找到了牛奶。',
-    natural: ['I found the milk.', 'Here is the milk.', 'The milk is here.'], actionPrompt: 'Good. Touch the milk.', hint: '点一下桌上的牛奶瓶。',
-  },
-  {
-    id: 'plate', interaction: 'tap', requiresAction: true, prompt: 'Where is the plate?', translation: '盘子在哪里？',
-    actionSuccess: 'Right — the plate is on the table.', actionTranslation: '对，盘子在桌上。',
-    question: 'What is it?', questionTranslation: '这是什么？', answer: 'plate',
-    spokenSuccess: 'A plate. You found the plate.', spokenTranslation: '一个盘子。你找到了盘子。',
-    natural: ["It’s a plate.", 'Here is the plate.', 'I found the plate.'], actionPrompt: 'Good. Touch the plate.', hint: '点一下桌子右侧的大盘子。',
-  },
-  {
-    id: 'cup', interaction: 'tap', requiresAction: true, prompt: 'Touch the cup.', translation: '碰一下杯子。',
-    actionSuccess: 'Good. That is the cup.', actionTranslation: '很好，那是杯子。',
-    question: 'What is it?', questionTranslation: '这是什么？', answer: 'cup',
-    spokenSuccess: 'A cup. You touched the cup.', spokenTranslation: '一个杯子。你碰了杯子。',
-    natural: ['I touched the cup.', 'This is the cup.', 'Here is the cup.'], actionPrompt: 'Yes. Touch the cup.', hint: '点一下桌子右侧的杯子。',
-  },
-  {
-    id: 'spoon', interaction: 'tap', requiresAction: true, prompt: 'Find the spoon.', translation: '你能找到勺子吗？',
-    actionSuccess: 'Yes, that is the spoon.', actionTranslation: '对，那是勺子。',
-    question: 'What is it?', questionTranslation: '这是什么？', answer: 'spoon',
-    spokenSuccess: 'A spoon. You found the spoon.', spokenTranslation: '一把勺子。你找到了勺子。',
-    natural: ['I found the spoon.', 'Here is the spoon.', 'The spoon is here.'], actionPrompt: 'Good. Touch the spoon.', hint: '点一下盘子下面的勺子。',
-  },
-];
+const KITCHEN_TASKS = Breakfast.tasks;
 
 const AIRPORT_TASKS = [
   { id: 'ticket', interaction: 'tap', requiresAction: true, prompt: 'Your ticket, please.', actionPrompt: 'Good. Show me the ticket.', hint: '点一下手里的登机牌。' },
@@ -235,6 +199,9 @@ const state = {
   subtitlesHidden: false,
   stage: 'idle',
   taskIndex: 0,
+  breakfast: Breakfast.initial(),
+  breakfastHelp: false,
+  breakfastCupSelected: false,
   hintLevel: 0,
   currentSpeech: 'Can you give me the apple?',
   activeQuestion: 'Can you give me the apple?',
@@ -385,7 +352,7 @@ function taskNeedsAction(task = currentTask()) {
 }
 
 function taskHasAction(task = currentTask()) {
-  return task.interaction === 'drag' || task.interaction === 'tap';
+  return ['drag', 'tap', 'choice', 'handoff'].includes(task.interaction);
 }
 
 function taskNeedsSpeech(task = currentTask()) {
@@ -977,7 +944,12 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
     || context.practiceSession !== state.practiceSession) return;
   const sameTask = state.selectedScene === context.sceneId && currentTask().id === context.taskId
     && state.taskIndex === context.taskIndex && state.stage === 'active';
-  if (!sameTask || feedback.meaning_valid !== true) return;
+  if (!sameTask) return;
+  if (Breakfast.isTask(context.taskId)) {
+    if (feedback.meaning_valid === true && feedback.choice) commitBreakfastChoice(feedback.choice, { utterance: message.text });
+    return;
+  }
+  if (feedback.meaning_valid !== true) return;
   if (isActionAcknowledgement(currentTask(), message.text, context.question)) return;
   state.lastTranscript = message.text;
   state.speechDone = true;
@@ -994,6 +966,10 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
 async function requestLanguageFeedback(question, answer, turnContext = {}) {
   const context = { ...captureUserTurnContext(), ...turnContext, question, answer };
   if (!context.final || context.practiceSession !== state.practiceSession) return;
+  if (Breakfast.isTask(context.taskId)) {
+    const choice = Breakfast.choiceFromText(context.taskId, answer, question);
+    if (choice) { applyDynamicFeedback({ meaning_valid: true, choice }, context); return; }
+  }
   const controller = new AbortController();
   state.pendingFeedback.add(controller);
   const timer = setTimeout(() => controller.abort(), 6500);
@@ -1206,6 +1182,7 @@ function updateSceneGeometry() {
   });
   syncTaskFocus(geometry);
   if (state.selectedScene === 'kitchen' && !state.dragging) setApplePosition(state.actionDone ? state.hand : state.initialApple, true);
+  if (isBreakfastScene()) syncBreakfastGeometry();
 }
 
 function configureScene() {
@@ -1219,7 +1196,7 @@ function configureScene() {
     const id = interactiveIds[index];
     hotspot.dataset.object = id || '';
     hotspot.hidden = !id;
-    hotspot.setAttribute('aria-label', id ? (config.anchors[id].label || id) : '');
+    hotspot.setAttribute('aria-label', id ? (config.anchors[id]?.label || id) : '');
     hotspot.dataset.label = config.anchors[id]?.label || '';
   });
 }
@@ -1390,6 +1367,7 @@ function finishDuplexTurnWhenAudioEnds() {
     if (!taskDone && taskNeedsSpeech() && !state.speechDone) openLearnerTurn();
     else openCourtesyTurn();
     if (!taskDone) flushDuplexTaskUpdate();
+    if (isBreakfastScene() && state.stage === 'active') renderBreakfast();
     after?.();
     if (state.sceneStarted && !state.handsFreeListening && !state.micMuted && !taskDone) startHandsFreeListening().catch(() => {});
     scheduleIdleNudge();
@@ -1506,6 +1484,7 @@ function transitionReplyReplacement(value) {
 }
 
 function safeCharacterReply() {
+  if (Breakfast.isTask(currentTask().id)) return state.actionDone ? Breakfast.acknowledgment(currentTask().id, state.breakfast) : currentTask().prompt;
   if (state.actionDone && !state.speechDone) {
     const afterActionQuestions = {
       apple: 'Thank you. What is it?',
@@ -1607,7 +1586,7 @@ function connectDuplexSession() {
     if (!current()) return;
     sendDuplex({ type: 'start', taskId: currentTask().id, actionDone: state.actionDone,
       speechDone: state.speechDone, coveredGoals: [...state.coveredGoals], flowState: state.stage,
-      speechRate: preferences.speechRate, history: state.dialogueHistory.filter(m => m.final || m.speaker === 'luma').slice(-12).map(m => ({ role: m.speaker === 'user' ? 'user' : 'assistant', text: m.text })) });
+      breakfast: state.breakfast, speechRate: preferences.speechRate, history: state.dialogueHistory.filter(m => m.final || m.speaker === 'luma').slice(-12).map(m => ({ role: m.speaker === 'user' ? 'user' : 'assistant', text: m.text })) });
   };
   socket.onmessage = async (message) => {
     if (!current()) return;
@@ -1738,6 +1717,7 @@ function updateDuplexTask({ force = false } = {}) {
     coveredGoals: [...state.coveredGoals],
     flowState: state.stage,
     speechRate: preferences.speechRate,
+    breakfast: state.breakfast,
   });
 }
 
@@ -1752,6 +1732,7 @@ function flushDuplexTaskUpdate() {
     coveredGoals: [...state.coveredGoals],
     flowState: state.stage,
     speechRate: preferences.speechRate,
+    breakfast: state.breakfast,
   });
 }
 
@@ -1807,6 +1788,11 @@ function emphasizeCurrentAction() {
 }
 
 function characterHintLine(level = 1) {
+  if (isBreakfastScene()) {
+    if (level >= 2) showBreakfastHelp();
+    if (currentTask().id === 'breakfast-cup') return 'A cup, please.';
+    return level === 1 ? currentTask().prompt : currentTask().id === 'breakfast-drink' ? 'Milk, please. Or water, please.' : 'Yes for more. No is okay.';
+  }
   const task = currentTask();
   if (taskNeedsAction(task) && !state.actionDone && level === 1) return task.actionPrompt || task.prompt;
   const support = speechSupportForTask(task);
@@ -1980,6 +1966,7 @@ function startTask(index, { speakAgain = true } = {}) {
   clearLocalSpeechTurn();
   stopSpeechPlayback();
   state.taskIndex = index;
+  state.breakfastHelp = false; state.breakfastCupSelected = false;
   const task = currentTask();
   state.stage = 'active';
   state.hintLevel = 0;
@@ -2034,6 +2021,7 @@ function startTask(index, { speakAgain = true } = {}) {
   micLabel.textContent = state.handsFreeListening ? '随时说' : state.micMuted ? '重试语音' : '准备中';
   currentGoalRecord();
   syncSceneProgress();
+  renderBreakfast();
   setApplePosition(state.initialApple, true);
   state.currentSpeech = '';
   state.activeQuestion = '';
@@ -2057,6 +2045,7 @@ function resetScene({ speakAgain = true } = {}) {
   state.pendingFeedback.clear();
   transcriptLedger.reset();
   microphoneBuffer.clear();
+  state.breakfast = Breakfast.initial();
   closeDuplexSession();
   state.dialogueHistory = [];
   state.coveredGoals = new Set();
@@ -2074,7 +2063,11 @@ function resetScene({ speakAgain = true } = {}) {
   startTask(0, { speakAgain });
 }
 
-function startScene({ subtitlesHidden = false } = {}) {
+function startScene({ subtitlesHidden = false, skipIntro = false } = {}) {
+  if (!skipIntro && localStorage.getItem('luma-intro-v1') !== 'seen') {
+    showSceneIntroduction({ subtitlesHidden }); return;
+  }
+  hideSceneIntroduction();
   claimExclusiveVoiceSession();
   unlockDuplexPlayback();
   closeSheet();
@@ -2109,6 +2102,9 @@ function startScene({ subtitlesHidden = false } = {}) {
 }
 
 function leaveScene({ keepVoice = false } = {}) {
+  hideSceneIntroduction();
+  breakfastWorld.hidden = true; breakfastPanel.hidden = true;
+  delete scene.dataset.breakfast;
   state.practiceSession += 1;
   state.pendingFeedback.forEach(controller => controller.abort());
   state.pendingFeedback.clear();
@@ -2347,7 +2343,8 @@ function showReview() {
   document.querySelector('#reviewHeard').textContent = `${heardCount} 条${state.practiceMode === 'listening' ? '无字幕理解' : '真实请求'}`;
   document.querySelector('#reviewActions').textContent = `完成 ${actionCount} 个有效动作`;
   document.querySelector('#reviewSpoken').textContent = `${goals.filter((goal) => goal.spoke).length} 次有效回应 · ${hintCount} 次提示`;
-  const original = representativeLearnerUtterance();
+  const didSpeak = goals.some(goal => goal.spoke);
+  const original = didSpeak ? representativeLearnerUtterance() : '你用动作完成了这次合作。下次可以试着说一个词。';
   const corrected = DialogueRules.gentleRecast(original);
   document.querySelector('#reviewOriginal').textContent = original;
   document.querySelector('#reviewCorrected').textContent = corrected;
@@ -2478,6 +2475,7 @@ function completeMultimodalTask({ waitForDuplexReply = false } = {}) {
   micLabel.textContent = state.handsFreeListening ? '随时说' : '完成';
   micButton.disabled = false;
   scene.classList.add('is-complete');
+  if (isBreakfastScene()) renderBreakfast();
   apple.classList.remove('is-celebrating');
   syncSceneProgress();
   if (!conversationBusy) {
@@ -2682,6 +2680,7 @@ function showHint() {
   if (['complete', 'task-complete'].includes(state.stage)) {
     return;
   }
+  if (isBreakfastScene()) { recordHint(); showBreakfastHelp(); speakCharacterCue(characterHintLine(1)); return; }
   state.hintLevel = Math.min(state.hintLevel + 1, 3);
   recordHint();
   emphasizeCurrentAction();

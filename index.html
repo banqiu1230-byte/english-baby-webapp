@@ -13,7 +13,7 @@
     <link rel="preload" href="./assets/apple.png" as="image" />
     <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/regular/style.css" />
     <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/fill/style.css" />
-    <link rel="stylesheet" href="./styles.css?v=41" />
+    <link rel="stylesheet" href="./styles.css?v=42" />
   </head>
   <body>
     <div class="app-frame" id="appFrame">
@@ -39,7 +39,7 @@
                 <h2 id="dailyTitle">帮 Luma 准备早餐</h2>
                 <div class="daily-tags">
                   <span>听懂指令</span>
-                  <span>5 个连续任务</span>
+                  <span>选饮料 · 递杯子 · 再来一点</span>
                 </div>
                 <button class="primary-cta" type="button" data-open-scene="kitchen">
                   无字幕再练 <i class="ph ph-arrow-right"></i>
@@ -173,6 +173,26 @@
             <div class="world" aria-hidden="true"><img class="background-blur" id="backgroundBlur" src="./assets/kitchen-mobile-neutral.png" alt="" draggable="false" /><img class="background-plane" id="backgroundPlane" src="./assets/kitchen-mobile-neutral.png" alt="" draggable="false" /><div class="sun-wash"></div><div class="dust" id="dust"></div><div class="companion-presence"></div></div>
             <div class="object-layer"><div class="task-focus" id="taskFocus" aria-hidden="true"><span></span></div><div class="drop-zone" id="dropZone" aria-hidden="true"><span></span></div><button class="apple-object" id="apple" type="button" aria-label="红苹果。拖动并交给 Luma。"><span class="apple-aura"></span><img src="./assets/apple.png" alt="红苹果" draggable="false" /><span class="apple-shadow"></span></button><button class="scene-hotspot" type="button" data-object="milk" aria-label="牛奶"><span></span></button><button class="scene-hotspot" type="button" data-object="plate" aria-label="盘子"><span></span></button><button class="scene-hotspot" type="button" data-object="cup" aria-label="杯子"><span></span></button><button class="scene-hotspot" type="button" data-object="spoon" aria-label="勺子"><span></span></button></div>
             <div class="foreground" aria-hidden="true"></div>
+            <div class="breakfast-world" id="breakfastWorld" hidden>
+              <button class="breakfast-cup" id="breakfastCup" type="button" aria-label="空杯子" hidden><span class="cup-handle" aria-hidden="true"></span><span class="cup-glass" aria-hidden="true"><span class="cup-liquid"></span></span></button>
+              <button class="cup-landing" id="cupLanding" type="button" hidden><i class="ph ph-hand" aria-hidden="true"></i><span>递给她</span></button>
+            </div>
+            <section class="breakfast-panel" id="breakfastPanel" aria-label="一起准备早餐" hidden>
+              <div class="breakfast-heading"><div><h2 id="breakfastTitle">选一杯喜欢的饮料</h2><p id="breakfastSelection">一个词就可以</p></div><button id="breakfastAssist" type="button">暂时说不出 <i class="ph ph-caret-down" aria-hidden="true"></i></button></div>
+              <div class="breakfast-choices" id="breakfastChoices" hidden></div>
+              <p class="breakfast-instruction" id="breakfastInstruction" hidden></p>
+              <p class="breakfast-outcome" id="breakfastOutcome" role="status"></p>
+            </section>
+            <section class="scene-intro" id="sceneIntro" role="dialog" aria-modal="true" aria-labelledby="introTitle" aria-describedby="introCopy" hidden>
+              <button id="introBack" class="intro-back" type="button" aria-label="先返回"><i class="ph ph-arrow-left" aria-hidden="true"></i></button>
+              <div class="intro-content"><span class="intro-greeting">不用会很多英语，先试着聊聊。</span><h1 id="introTitle">帮 Luma 准备早餐</h1>
+                <p id="introCopy">听不懂，随时开口问<span id="introPerson">Luma</span>。<br />直接说「什么意思？」也可以。</p>
+                <p class="intro-example">一个词、短句，都可以。<br />她说话时你也能开口，不用等提示音。</p>
+                <button class="intro-ready" id="introReady" type="button">准备好了，开始 <i class="ph ph-arrow-right" aria-hidden="true"></i></button>
+                <label class="intro-remember"><input id="introRemember" type="checkbox" /> 下次直接开始</label>
+                <small>开始后会申请麦克风权限；不方便说话，也可以打字。</small>
+              </div>
+            </section>
             <header class="experience-topbar"><button type="button" id="exitScene" aria-label="退出情境"><i class="ph ph-arrow-left"></i></button><div class="scene-step" id="sceneProgress" role="progressbar" aria-label="场景学习进度" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"><span id="stepFill"></span></div><div class="mode-pill" id="modePill"><span class="mode-dot"></span><span id="modeLabel">准备开始</span></div><button class="subtitle-toggle" type="button" id="subtitleToggle" aria-label="隐藏字幕" aria-pressed="true" title="隐藏字幕"><i class="ph ph-closed-captioning"></i></button><button type="button" id="resetButton" aria-label="重新开始"><i class="ph ph-arrow-counter-clockwise"></i></button></header>
             <div class="action-coach" id="actionCoach" role="status" hidden><i class="ph ph-hand-grabbing" aria-hidden="true"></i><span id="actionCoachText"></span></div>
             <section class="language-panel" id="languagePanel" aria-live="polite" hidden><div class="recent-dialogue" id="recentDialogue"></div><button class="dialogue-history-button" id="openDialogueHistory" type="button">全部对话 <i class="ph ph-caret-up"></i></button></section>
@@ -199,8 +219,10 @@
         </section>
       </main>
     </div>
+    <script src="./breakfast.js?v=1" defer></script>
     <script src="./dialogue-rules.js?v=4" defer></script>
     <script src="./voice-runtime.js?v=1" defer></script>
-    <script src="./app.js?v=107" defer></script>
+    <script src="./app.js?v=108" defer></script>
+    <script src="./breakfast-ui.js?v=1" defer></script>
   </body>
 </html>

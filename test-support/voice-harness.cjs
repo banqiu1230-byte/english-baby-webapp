@@ -8,6 +8,7 @@ const root = path.join(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const rules = require(path.join(root, 'dialogue-rules.js'));
 const VoiceRuntime = require(path.join(root, 'voice-runtime.js'));
+const Breakfast = require(path.join(root, 'breakfast.js'));
 const declarations = [...app.matchAll(/^(?:async )?function (\w+)\([^]*?^\}$/gm)];
 const functions = new Map(declarations.map(match => [match[1], match[0]]));
 
@@ -32,7 +33,8 @@ function harness(overrides = {}) {
     close() { this.readyState = 3; }
   }
   const sandbox = {
-    console, Promise, Set, Map, Math, Float32Array, Int16Array, Buffer,
+    console, Promise, Set, Map, Math, Float32Array, Int16Array, Buffer, Breakfast,
+    isBreakfastScene: () => false, renderBreakfast() {},
     atob: value => Buffer.from(value, 'base64').toString('binary'),
     Date: class extends Date { static now() { return now; } },
     setTimeout(fn, ms) { const id = ++serial; timers.set(id, { fn, at: now + ms }); return id; },

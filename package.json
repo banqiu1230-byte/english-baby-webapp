@@ -6,8 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check dialogue-rules.js && node --check voice-runtime.js && node --check microphone-worklet.js && node --check app.js && node --check server.js",
-    "test": "node --test *.test.js"
+    "check": "node --check dialogue-rules.js && node --check voice-runtime.js && node --check microphone-worklet.js && node --check breakfast.js && node --check breakfast-ui.js && node --check app.js && node --check server.js",
+    "test": "node --test *.test.js",
+    "test:browser": "node test-support/breakfast-browser.cjs"
   },
   "keywords": [],
   "author": "",
