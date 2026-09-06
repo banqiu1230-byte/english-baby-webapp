@@ -13,7 +13,7 @@
     <link rel="preload" href="./assets/apple.png" as="image" />
     <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/regular/style.css" />
     <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/fill/style.css" />
-    <link rel="stylesheet" href="./styles.css?v=42" />
+    <link rel="stylesheet" href="./styles.css?v=43" />
   </head>
   <body>
     <div class="app-frame" id="appFrame">
@@ -185,12 +185,20 @@
             </section>
             <section class="scene-intro" id="sceneIntro" role="dialog" aria-modal="true" aria-labelledby="introTitle" aria-describedby="introCopy" hidden>
               <button id="introBack" class="intro-back" type="button" aria-label="先返回"><i class="ph ph-arrow-left" aria-hidden="true"></i></button>
-              <div class="intro-content"><span class="intro-greeting">不用会很多英语，先试着聊聊。</span><h1 id="introTitle">帮 Luma 准备早餐</h1>
-                <p id="introCopy">听不懂，随时开口问<span id="introPerson">Luma</span>。<br />直接说「什么意思？」也可以。</p>
-                <p class="intro-example">一个词、短句，都可以。<br />她说话时你也能开口，不用等提示音。</p>
-                <button class="intro-ready" id="introReady" type="button">准备好了，开始 <i class="ph ph-arrow-right" aria-hidden="true"></i></button>
-                <label class="intro-remember"><input id="introRemember" type="checkbox" /> 下次直接开始</label>
-                <small>开始后会申请麦克风权限；不方便说话，也可以打字。</small>
+              <div class="intro-content">
+                <header class="intro-heading">
+                  <span class="intro-greeting">不用会很多英语，先试着聊聊。</span>
+                  <h1 id="introTitle"><span>帮 <em>Luma</em></span><span>准备早餐</span></h1>
+                </header>
+                <div class="intro-guidance">
+                  <div class="intro-guidance-row"><i class="ph ph-chat-circle" aria-hidden="true"></i><p id="introCopy">听不懂，随时开口问<span id="introPerson">Luma</span>。<br />直接说<strong>「什么意思？」</strong>也可以。</p></div>
+                  <div class="intro-guidance-row intro-guidance-secondary"><i class="ph ph-microphone" aria-hidden="true"></i><p class="intro-example">一个词、短句，都可以。<br />她说话时你也能开口，不用等提示音。</p></div>
+                </div>
+                <div class="intro-actions">
+                  <button class="intro-ready" id="introReady" type="button"><span>准备好了，开始</span><i class="ph ph-arrow-right" aria-hidden="true"></i></button>
+                  <label class="intro-remember"><input id="introRemember" type="checkbox" /><span class="intro-check" aria-hidden="true"><i class="ph ph-check"></i></span><span>下次直接开始</span></label>
+                  <small>开始后会申请麦克风权限；不方便说话，也可以打字。</small>
+                </div>
               </div>
             </section>
             <header class="experience-topbar"><button type="button" id="exitScene" aria-label="退出情境"><i class="ph ph-arrow-left"></i></button><div class="scene-step" id="sceneProgress" role="progressbar" aria-label="场景学习进度" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"><span id="stepFill"></span></div><div class="mode-pill" id="modePill"><span class="mode-dot"></span><span id="modeLabel">准备开始</span></div><button class="subtitle-toggle" type="button" id="subtitleToggle" aria-label="隐藏字幕" aria-pressed="true" title="隐藏字幕"><i class="ph ph-closed-captioning"></i></button><button type="button" id="resetButton" aria-label="重新开始"><i class="ph ph-arrow-counter-clockwise"></i></button></header>
@@ -219,10 +227,10 @@
         </section>
       </main>
     </div>
-    <script src="./breakfast.js?v=1" defer></script>
+    <script src="./breakfast.js?v=2" defer></script>
     <script src="./dialogue-rules.js?v=4" defer></script>
     <script src="./voice-runtime.js?v=1" defer></script>
-    <script src="./app.js?v=108" defer></script>
-    <script src="./breakfast-ui.js?v=1" defer></script>
+    <script src="./app.js?v=109" defer></script>
+    <script src="./breakfast-ui.js?v=2" defer></script>
   </body>
 </html>

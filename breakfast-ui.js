@@ -20,7 +20,9 @@ function showSceneIntroduction(options) {
   experience.classList.add('is-active');
   experience.setAttribute('aria-hidden', 'false');
   scene.classList.add('is-intro');
-  document.querySelector('#introTitle').textContent = SCENES[state.selectedScene].title;
+  const title = document.querySelector('#introTitle');
+  if (state.selectedScene === 'kitchen') title.innerHTML = '<span>帮 <em>Luma</em></span><span>准备早餐</span>';
+  else title.textContent = SCENES[state.selectedScene].title;
   document.querySelector('#introPerson').textContent = state.selectedScene === 'kitchen' ? 'Luma' : '对方';
   sceneIntro.hidden = false;
   for (const child of scene.children) if (child !== sceneIntro) child.inert = true;

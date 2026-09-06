@@ -344,7 +344,8 @@ voiceSessionChannel?.addEventListener('message', (event) => {
 
 function currentTask() {
   const tasks = currentSceneConfig().tasks;
-  return tasks[state.taskIndex] ?? tasks[0];
+  const task = tasks[state.taskIndex] ?? tasks[0];
+  return task.id === 'breakfast-more' ? { ...task, prompt: Breakfast.promptFor(task.id, state.breakfast) } : task;
 }
 
 function taskNeedsAction(task = currentTask()) {
@@ -1790,8 +1791,13 @@ function emphasizeCurrentAction() {
 function characterHintLine(level = 1) {
   if (isBreakfastScene()) {
     if (level >= 2) showBreakfastHelp();
-    if (currentTask().id === 'breakfast-cup') return 'A cup, please.';
-    return level === 1 ? currentTask().prompt : currentTask().id === 'breakfast-drink' ? 'Milk, please. Or water, please.' : 'Yes for more. No is okay.';
+    if (level === 1) return currentTask().prompt;
+    const explanations = {
+      'breakfast-drink': '你想喝牛奶还是水？可以说 Milk，或者 Water。',
+      'breakfast-cup': '请给我一个杯子。把杯子拖到我手边就可以。',
+      'breakfast-more': '你还想再喝一点吗？想要就说 Yes，够了就说 No。',
+    };
+    return explanations[currentTask().id];
   }
   const task = currentTask();
   if (taskNeedsAction(task) && !state.actionDone && level === 1) return task.actionPrompt || task.prompt;

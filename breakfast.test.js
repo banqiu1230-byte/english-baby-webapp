@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const B = require('./breakfast');
+test('character questions are complete and name the chosen drink', () => {
+  assert.equal(B.promptFor('breakfast-drink'), 'Do you want milk or water?');
+  assert.equal(B.promptFor('breakfast-more', {drink:'milk'}), 'Do you want more milk?');
+  assert.equal(B.promptFor('breakfast-more', {drink:'water'}), 'Do you want more water?');
+  assert.equal(B.promptFor('breakfast-more'), 'Do you want more to drink?');
+  assert.equal(B.choiceFromText('breakfast-more', 'No, thanks.', B.promptFor('breakfast-more', {drink:'water'})), 'enough');
+});
 test('drink preference accepts short and natural beginner answers', () => {
   for (const text of ['Milk.', 'Milk, please.', 'I would like milk.', '牛奶']) assert.equal(B.choiceFromText('breakfast-drink', text), 'milk');
   assert.equal(B.choiceFromText('breakfast-drink', "I'd like water please."), 'water');

@@ -2,17 +2,19 @@
 const Breakfast = (() => {
   const tasks = [
     { id: 'breakfast-drink', interaction: 'choice', requiresAction: true, requiresSpeech: false,
-      prompt: 'Milk or water?', hint: '告诉 Luma 想喝什么。说 Milk 或 Water 就可以，也可以点选。',
+      prompt: 'Do you want milk or water?', hint: '告诉 Luma 想喝什么。说 Milk 或 Water 就可以，也可以点选。',
       label: '选一杯喜欢的饮料', view: 'fridge', choices: ['milk', 'water'] },
     { id: 'breakfast-cup', interaction: 'handoff', requiresAction: true, requiresSpeech: false,
       prompt: 'Give me a cup, please.', hint: '把杯子拖到 Luma 手边，或点杯子再点「递给她」。可以说 Here。',
       label: '一起准备杯子', view: 'table', choices: [] },
     { id: 'breakfast-more', interaction: 'choice', requiresAction: true, requiresSpeech: false,
-      prompt: 'More?', hint: '想再来一点就说 Yes；够了可以说 No 或 Enough。也可以点选。',
+      prompt: 'Do you want more to drink?', hint: '想再来一点就说 Yes；够了可以说 No 或 Enough。也可以点选。',
       label: '告诉她要多少', view: 'table', choices: ['more', 'enough'] },
   ];
   const initial = () => ({ drink: null, cupPlaced: false, amount: null });
   const isTask = id => tasks.some(task => task.id === id);
+  const promptFor = (id, world = {}) => id === 'breakfast-more' && ['milk', 'water'].includes(world.drink)
+    ? `Do you want more ${world.drink}?` : tasks.find(task => task.id === id)?.prompt;
   const normalize = text => String(text || '').toLowerCase().replace(/[’']/g, '').replace(/[^a-z\p{Script=Han}]+/gu, ' ').trim();
   function choiceFromText(taskId, text, question = '') {
     const raw = String(text || ''), clean = normalize(text), asked = normalize(question);
@@ -48,6 +50,6 @@ const Breakfast = (() => {
   const acknowledgment = (taskId, world) => taskId === 'breakfast-drink'
     ? `Okay. ${world.drink === 'water' ? 'Water' : 'Milk'} for you.`
     : taskId === 'breakfast-cup' ? 'Thank you.' : world.amount === 'more' ? 'A little more. Here you go.' : 'Okay. Here you go.';
-  return { tasks, initial, isTask, choiceFromText, apply, facts, acknowledgment };
+  return { tasks, initial, isTask, promptFor, choiceFromText, apply, facts, acknowledgment };
 })();
 if (typeof module !== 'undefined') module.exports = Breakfast;
