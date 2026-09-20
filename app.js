@@ -540,8 +540,9 @@ function syncCoffeeMissionHud() {
   missionHudCode.textContent = `任务 ${state.coffeeMissionId}`;
   const target = coffeeTargetState();
   const targetText = target ? ['size', 'drink', 'service'].map(slot => coffeeSlotLabel(slot, target[slot])).join(' · ') : '';
-  missionHudTitle.textContent = targetText && ['C02', 'C04'].includes(state.coffeeMissionId) ? `${mission.title} · ${targetText}` : mission.title;
+  missionHudTitle.textContent = targetText ? `${mission.title} · ${targetText}` : mission.title;
   missionHudProgress.textContent = `${Math.min(state.taskIndex + 1, tasks.length)} / ${tasks.length}`;
+  orderSlots.setAttribute('aria-label', state.coffeeMissionId === 'C03' ? '实际收到的咖啡' : '订单进度');
   const order = coffeeOrderState();
   const delivered = coffeeDeliveredState();
   for (const element of orderSlots.querySelectorAll('[data-order-slot]')) {
@@ -1259,7 +1260,7 @@ function escapeHtml(value) {
 }
 
 function dialogueMarkup(message) {
-  return `<article class="dialogue-bubble is-${message.speaker}" data-message-id="${message.id}"><small>${message.speaker === 'user' ? '你' : escapeHtml(message.name || 'Luma')}</small><p>${escapeHtml(message.text)}</p><span class="transcript-status">${escapeHtml(message.status || '')}</span></article>`;
+  return `<article class="dialogue-bubble is-${message.speaker}" data-message-id="${message.id}"><small>${message.speaker === 'user' ? '你' : escapeHtml(message.name || 'Luma')}</small><p>${escapeHtml(message.text)}</p><span class="transcript-status"><i aria-hidden="true"></i><span></span></span></article>`;
 }
 
 function renderDialogue() {
@@ -1271,7 +1272,17 @@ function renderDialogue() {
       if (!node) { container.insertAdjacentHTML('beforeend', dialogueMarkup(message)); node = container.lastElementChild; }
       const text = node.querySelector('p'), status = node.querySelector('.transcript-status');
       if (text.textContent !== message.text) text.textContent = message.text;
-      if (status.textContent !== (message.status || '')) status.textContent = message.status || '';
+      const statusText = message.status || '';
+      if (status.querySelector('span').textContent !== statusText) status.querySelector('span').textContent = statusText;
+      status.hidden = !statusText;
+      status.title = statusText;
+      status.setAttribute('aria-label', statusText);
+      const statusState = /未|不一致|再试|再说/.test(statusText) ? 'retry'
+        : statusText.startsWith('已确认') ? 'confirmed'
+        : /正在/.test(statusText) ? 'pending'
+        : /^已听到|^已接到/.test(statusText) ? 'heard' : 'note';
+      status.dataset.state = statusState;
+      status.querySelector('i').className = `ph ph-${{ confirmed: 'check-circle', heard: 'check', pending: 'dots-three', retry: 'warning-circle', note: 'info' }[statusState]}`;
     }
   };
   const taskMessages = state.dialogueHistory.filter(message => message.taskId === currentTask().id);
@@ -1279,6 +1290,7 @@ function renderDialogue() {
   // “全部对话”; pinning an older accepted answer created a third card and hid
   // the newest reply behind an inner scrollbar.
   const recent = taskMessages.slice(-2);
+  if (recent.length === 2 && recent[0].speaker === recent[1].speaker) recent.shift();
   updateList(recentDialogue, recent);
   if (dialogueHistory.classList.contains('is-open')) updateList(dialogueHistoryList, state.dialogueHistory);
   languagePanel.hidden = recent.length === 0;
@@ -1632,6 +1644,7 @@ function commitCoffeeChoice(choice, { source = 'voice', utterance = '', missionF
 function openDialogueHistoryPanel() {
   dialogueHistory.classList.add('is-open');
   dialogueHistory.setAttribute('aria-hidden', 'false');
+  openDialogueHistory.setAttribute('aria-expanded', 'true');
   renderDialogue();
   dialogueHistoryList.scrollTop = dialogueHistoryList.scrollHeight;
 }
@@ -1639,6 +1652,7 @@ function openDialogueHistoryPanel() {
 function closeDialogueHistoryPanel() {
   dialogueHistory.classList.remove('is-open');
   dialogueHistory.setAttribute('aria-hidden', 'true');
+  openDialogueHistory.setAttribute('aria-expanded', 'false');
 }
 
 function syncA11yState() {
