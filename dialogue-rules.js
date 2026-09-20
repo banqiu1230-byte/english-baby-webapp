@@ -37,7 +37,7 @@ const DialogueRules = (() => {
     if (taskId === 'bag' && /[?？]/.test(String(text || ''))) return false;
     if (taskId === 'office-signin') {
       const name = answer.replace(/^(?:my name is|i am|i m) /, '');
-      if (/\b(?:hello|hi|hey|yes|yeah|yep|no|nope|okay|ok|sure|thanks|thank|happy|fine|ready|here|tired|sorry|help|please|good|wait|nothing|unknown|maybe|perhaps|unsure|uh|um|erm|hmm|well|oh)\b/.test(name)) return false;
+      if (/\b(?:hello|hi|hey|yes|yeah|yep|no|nope|okay|ok|sure|thanks|thank|happy|fine|great|ready|here|tired|sorry|help|please|good|wait|nothing|unknown|maybe|perhaps|unsure|uh|um|erm|hmm|well|oh)\b/.test(name)) return false;
     }
     return pattern.test(answer);
   };
@@ -64,6 +64,28 @@ const DialogueRules = (() => {
       || /^(?:(?:你)?(?:能|可以|能不能|可不可以)?(?:请)?(?:翻译|解释)(?:一下|这个|这句|这句话)?(?:吗)?)$/.test(raw)
       || /^(?:i (?:still )?don t (?:understand|know)|what does .+ mean|what do you mean|(?:can|could|would) you explain (?:it|that|this|.+))(?: please)?$/.test(clean)) return 'meaning';
     return '';
+  };
+
+  // Fast-path only complete social utterances. A greeting attached to an order
+  // still needs normal task interpretation, and a name is not small talk.
+  const isSmallTalk = value => {
+    const raw = String(value || '').trim().replace(/[。！？!?.,，]+$/g, '');
+    const clean = normalize(value);
+    return /^(?:(?:hi|hello|hey)(?: mia|luma|maya)?|good morning|good afternoon|good evening)(?: (?:how are you(?: today)?|how s your day))?$/.test(clean)
+      || /^(?:how are you(?: today)?|how s your day(?: going)?|how are you doing|nice to (?:see|meet) you(?: too)?|you too)$/.test(clean)
+      || /^(?:(?:i m|i am) )?(?:fine|good|great|happy|tired|a little tired|not bad)(?: today)?(?: thanks| thank you)?(?: and you| how about you)?$/.test(clean)
+      || /^(?:and you|how about you|it s (?:a )?(?:nice|lovely|beautiful) day|(?:nice|lovely|beautiful) weather(?: today)?)$/.test(clean)
+      || /^(?:你好|嗨|早上好|下午好|晚上好|你好吗|你今天怎么样|我很好|我挺好的|我有点累|你呢|今天天气真好|很高兴认识你)$/.test(raw);
+  };
+
+  const openingLine = (taskId, prompt) => {
+    const greeting = {
+      'coffee-order': 'Hi! Welcome in.',
+      'breakfast-drink': 'Good morning!',
+      ticket: 'Hello!',
+      'office-purpose': 'Hi! Welcome.',
+    }[taskId];
+    return greeting ? `${greeting} ${prompt}` : prompt;
   };
   const requirementsMet = ({ needsAction, actionDone, needsSpeech, speechDone }) => (
     (!needsAction || actionDone) && (!needsSpeech || speechDone) && (actionDone || speechDone)
@@ -104,6 +126,8 @@ const DialogueRules = (() => {
     normalize,
     matchesTask,
     supportIntent,
+    isSmallTalk,
+    openingLine,
     requirementsMet,
     isQuestion,
     transitionDwell,

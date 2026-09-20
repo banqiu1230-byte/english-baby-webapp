@@ -6,7 +6,10 @@ const { EventEmitter } = require('node:events');
 const source = fs.readFileSync(require.resolve('./server.js'), 'utf8');
 const attach = source.match(/^function attachDuplexProxy\([^]*?^\}$/m)[0];
 const normalizeCoffeeState = source.match(/^function normalizeCoffeeState\([^]*?^\}$/m)[0];
-function proxy() {
+const voiceDeclarations = ['ASR_COMMON_WORDS', 'ASR_SCENE_WORDS', 'DUPLEX_TASKS', 'SCENE_FACTS']
+  .map(name => source.match(new RegExp(`^const ${name} = [^]*?^[\\]}];`, 'm'))[0]).join('\n');
+const duplexAsr = source.match(/^function duplexAsr\([^]*?^\}$/m)[0];
+function proxy(start = {}) {
   const sockets = [], timers = [], instructionCalls = [];
   class Socket extends EventEmitter {
     static OPEN = 1;
@@ -16,14 +19,14 @@ function proxy() {
     terminate() {} ping() {}
   }
   const context = vm.createContext({ Buffer, Breakfast: require('./breakfast'), Coffee: require('./coffee'), WebSocket: Socket, crypto: {randomUUID:()=> 'test-id'},
-    console:{log(){}},process:{env:{DOUBAO_API_KEY:'test-only'}},DUPLEX_URL:'wss://test.invalid',DUPLEX_TASKS:{milk:'test'},ASR_HOTWORDS:[],
+    console:{log(){}},process:{env:{DOUBAO_API_KEY:'test-only'}},DUPLEX_URL:'wss://test.invalid',
     duplexInstructions:(...args)=> {instructionCalls.push(args);return 'test';},cleanText: text=>text,
     setTimeout: fn=> {timers.push(fn);return 1;},setInterval:()=>1,clearInterval() {},
   });
-  vm.runInContext(`${normalizeCoffeeState}\n${attach}`,context);
+  vm.runInContext(`${voiceDeclarations}\n${duplexAsr}\n${normalizeCoffeeState}\n${attach}`,context);
   const client = new Socket(); sockets.length = 0;
   context.attachDuplexProxy(client);
-  client.emit('message', Buffer.from('{"type":"start","taskId":"milk","speechRate":"慢速"}'), false);
+  client.emit('message', Buffer.from(JSON.stringify({type:'start',taskId:'milk',speechRate:'慢速',...start})), false);
   const upstream = sockets[0]; upstream.emit('open');
   return {client,upstream,timers,instructionCalls};
 }
@@ -68,4 +71,39 @@ test('the voice proxy ignores removed text-answer events', () => {
   upstream.emit('message',Buffer.from('{"type":"session.created"}'));
   client.emit('message',Buffer.from('{"type":"user.text","text":"A latte, please."}'),false);
   assert.equal(upstream.sent.some(event=>event.type==='conversation.item.create'),false);
+});
+
+
+test('first session sends effective scene-specific ASR hints in the documented extension', () => {
+  const { upstream } = proxy({ taskId: 'coffee-order' });
+  const event = upstream.sent[0];
+  assert.equal(event.session.model, '1.2.6.1');
+  assert.equal(event.session.asr, undefined, 'session.asr is not a Seeduplex field');
+  assert.equal(event.extension.asr.extra.enable_asr_twopass, true);
+  const hints = JSON.parse(event.extension.asr.extra.context);
+  const words = hints.hotwords.map(item => item.word);
+  for (const word of ['hello', 'yes', 'a latte please', 'americano', 'small', 'to go']) assert.ok(words.includes(word), word);
+  assert.equal(words.includes('gate A12'), false, 'unrelated scenes must not compete with a short first reply');
+  assert.equal(hints.correct_words, undefined, 'do not rewrite genuine Chinese into guessed English');
+  assert.equal(event.extension.asr.language, undefined, 'do not invent an English-only protocol switch');
+});
+
+test('task updates and fresh reconnects apply the active scene vocabulary', () => {
+  const { client, upstream } = proxy({ taskId: 'coffee-order' });
+  client.emit('message', Buffer.from(JSON.stringify({type:'task.update', taskId:'ticket'})), false);
+  const update = upstream.sent.at(-1);
+  assert.equal(update.type, 'session.update');
+  assert.equal(update.session.asr, undefined);
+  const words = JSON.parse(update.extension.asr.extra.context).hotwords.map(item => item.word);
+  assert.ok(words.includes('boarding pass'));
+  assert.equal(words.includes('latte'), false);
+  const reconnected = proxy({taskId:'ticket',history:[{role:'assistant',text:'May I see your ticket?'}]});
+  assert.deepEqual(reconnected.upstream.sent[0].extension.asr, update.extension.asr);
+});
+
+test('Chinese help transcripts are forwarded intact with English vocabulary hints enabled', () => {
+  const { client, upstream } = proxy({taskId:'coffee-order'});
+  const event = {type:'conversation.item.input_audio_transcription.completed', item_id:'help-1', transcript:'这句话是什么意思？'};
+  upstream.emit('message', Buffer.from(JSON.stringify(event)));
+  assert.deepEqual(client.sent.at(-1), event);
 });

@@ -93,3 +93,17 @@ test('leaving before the opening delay cannot start an obsolete character line',
   await h.advance(1000);
   assert.equal(h.effects.filter(e => e.type === 'sent' && e.data.type === 'say').length, 0);
 });
+
+test('coffee greeting is shown and spoken once, with no extra task or repeated welcome', async () => {
+  const h = openingHarness();
+  Object.assign(h.task, { id: 'coffee-order', prompt: 'Would you like a latte or an americano?' });
+  h.s.selectedScene = 'coffee';
+  h.c.startTask(0);
+  assert.equal(h.s.dialogueHistory[0].text, 'Hi! Welcome in. Would you like a latte or an americano?');
+  await h.advance(180);
+  assert.equal(h.effects.find(e => e.type === 'sent' && e.data.type === 'say').data.text,
+    h.s.dialogueHistory[0].text, 'visible and spoken openings must agree');
+  assert.equal(h.s.taskIndex, 0);
+  h.c.startTask(0);
+  assert.equal(h.s.dialogueHistory.at(-1).text, h.task.prompt, 'retrying the question does not welcome the learner again');
+});

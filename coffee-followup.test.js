@@ -284,3 +284,69 @@ test('C01: answering during a guarded reply retry leaves the new confirmation au
   assert.deepEqual(requestedLines, ['Okay. A small americano.']);
   assert.equal(h.s.dialogueHistory.some(message => message.status?.includes('语音未播放')), false);
 });
+
+for (const answer of ['Hi!', 'How are you?', "I'm fine, thanks. And you?", '你好', 'Nice weather today.']) {
+  test(`small talk gets the provider reply without a duplicate question: ${answer}`, async () => {
+    const h = coffeeHarness();
+    loadCoffeeProgress(h);
+    h.s.coffee = Coffee.missionInitial('C01');
+    h.s.coveredGoals = new Set();
+    h.c.fetch = () => { throw new Error('Small talk must not wait for semantic feedback'); };
+    const message = { id: 2, speaker: 'user', text: answer, final: true, revision: 1, taskId: 'coffee-order' };
+    h.s.dialogueHistory = [message];
+    const response = h.c.beginExpectedResponse('user');
+    await h.c.requestLanguageFeedback(h.s.activeQuestion, answer, {
+      ...h.c.captureUserTurnContext(), messageId: 2, revision: 1, answer, final: true, source: 'voice',
+    });
+    assert.equal(h.s.coffee.revision, 0);
+    assert.equal(h.s.coffee.drink, null);
+    assert.equal(h.s.stage, 'active');
+    assert.equal(message.status, '继续当前对话');
+    assert.equal(h.s.expectedResponse, response, 'keep the existing character response alive');
+    assert.equal(h.effects.some(e => ['spoken', 'scored', 'replaced'].includes(e.type)), false);
+    h.s.duplexPendingSubtitle = 'Hi! I’m good, thanks. And you?';
+    h.s.duplexValidatedText = true;
+    h.s.duplexSpeaking = true;
+    assert.equal(h.c.publishDuplexSubtitle(), true);
+    assert.ok(h.effects.some(e => e.type === 'caption' && /I’m good/.test(e.text)));
+  });
+}
+
+test('an unfamiliar social answer does not get overwritten by the original coffee question', () => {
+  const h = coffeeHarness(1);
+  const answer = 'The garden outside is beautiful.';
+  const message = { id: 2, speaker: 'user', text: answer, final: true, revision: 1, taskId: 'coffee-size' };
+  h.s.dialogueHistory = [message];
+  const response = h.c.beginExpectedResponse('user');
+  h.c.applyDynamicFeedback({ meaning_valid: false }, {
+    ...h.c.captureUserTurnContext(), messageId: 2, revision: 1, answer, final: true, source: 'voice',
+  });
+  assert.equal(message.status, '继续当前对话');
+  assert.equal(h.s.coffee.size, null);
+  assert.equal(h.s.expectedResponse, response);
+  assert.equal(h.effects.some(e => e.type === 'spoken'), false);
+});
+
+test('greeting plus an order question still commits exactly one order', async () => {
+  const h = coffeeHarness();
+  loadCoffeeProgress(h);
+  h.s.coffee = Coffee.missionInitial('C01');
+  h.s.coveredGoals = new Set();
+  h.c.fetch = () => { throw new Error('Clear polite order should resolve locally'); };
+  const answer = 'Hi Mia, could I have an americano, please?';
+  const message = { id: 2, speaker: 'user', text: answer, final: true, revision: 1, taskId: 'coffee-order' };
+  h.s.dialogueHistory = [message];
+  await h.c.requestLanguageFeedback(h.s.activeQuestion, answer, {
+    ...h.c.captureUserTurnContext(), messageId: 2, revision: 1, answer, final: true, source: 'voice',
+  });
+  assert.equal(h.s.coffee.drink, 'americano');
+  assert.equal(h.s.stage, 'task-complete');
+  assert.equal(h.effects.filter(e => e.type === 'spoken').length, 1);
+});
+
+test('a polite You too after handover completes the coffee visit', () => {
+  const ordered = Coffee.advanceMission(Coffee.missionInitial('C01'), 'A small latte for here.').world;
+  const result = Coffee.advanceMission(ordered, 'You too!');
+  assert.equal(result.accepted, true);
+  assert.equal(Coffee.missionComplete(result.world), true);
+});

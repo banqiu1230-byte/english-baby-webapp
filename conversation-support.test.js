@@ -162,3 +162,52 @@ test('failed speech preserves a readable question without recording hearing', ()
   assert.equal(advanced, true);
   assert.equal(h.s.questionReadyAt, 0);
 });
+
+test('social fast path cannot swallow orders, names, help or valid task greetings', () => {
+  const { isSmallTalk, openingLine } = require('./dialogue-rules');
+  for (const text of ['Hi!', 'Good morning.', "I'm a little tired today.", 'How are you?', '你好'])
+    assert.equal(isSmallTalk(text), true, text);
+  for (const text of ['Hi, a latte please.', 'Hello, may I have a small latte?', 'My name is Li.',
+    'Yes.', 'For here.', 'How do I say small?', '听不懂']) assert.equal(isSmallTalk(text), false, text);
+  assert.equal(matchesTask('office-greeting', 'Hi Maya!'), true);
+  assert.equal(openingLine('breakfast-drink', 'Do you want milk or water?'), 'Good morning! Do you want milk or water?');
+});
+
+test('greeted task questions still support Chinese help and instant task interpretation', async () => {
+  const { openingLine } = require('./dialogue-rules');
+  for (const [id, prompt, answer] of [
+    ['ticket', 'May I see your ticket?', 'Here you are.'],
+    ['office-purpose', 'Who are you here to see?', 'Maya.'],
+  ]) {
+    const h = harness();
+    Object.assign(h.task, { id, prompt, requiresAction: false });
+    h.s.selectedScene = id === 'ticket' ? 'airport' : 'office';
+    h.s.activeQuestion = openingLine(id, prompt);
+    h.load('handleConversationSupport', 'requestLanguageFeedback');
+    const helpLines = [], accepted = [];
+    h.c.speak = (text, options) => helpLines.push({text, options});
+    h.c.applyDynamicFeedback = result => accepted.push(result);
+    h.c.fetch = () => { throw Error('An explicit task answer must remain local'); };
+    assert.equal(h.c.isCurrentTaskQuestion(h.s.activeQuestion), true);
+    assert.equal(h.c.handleConversationSupport('什么意思', h.c.captureUserTurnContext(), {}), true);
+    assert.equal(helpLines.length, 1);
+    assert.equal(helpLines[0].options.prompt, false);
+    await h.c.requestLanguageFeedback(h.s.activeQuestion, answer, { final: true });
+    assert.equal(accepted[0].meaning_valid, true);
+  }
+});
+
+test('an upbeat social answer is never registered as an office name', async () => {
+  const h = harness();
+  Object.assign(h.task, { id: 'office-signin', prompt: 'What is your name, please?', requiresAction: false });
+  h.s.activeQuestion = h.task.prompt;
+  h.load('requestLanguageFeedback');
+  const results = [];
+  h.c.applyDynamicFeedback = result => results.push(result);
+  h.c.fetch = () => { throw Error('Small talk should not await semantic feedback'); };
+  for (const answer of ['Great!', 'I am great.']) {
+    assert.equal(matchesTask('office-signin', answer), false);
+    await h.c.requestLanguageFeedback(h.task.prompt, answer, { final: true });
+  }
+  assert.ok(results.every(result => result.conversational === true && !result.meaning_valid));
+});

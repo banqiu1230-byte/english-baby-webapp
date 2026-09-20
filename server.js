@@ -25,12 +25,30 @@ function sameOrigin(request) {
   try { return new URL(request.headers.origin).host === request.headers.host; } catch { return false; }
 }
 const DUPLEX_URL = 'wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue';
-const ASR_HOTWORDS = [
-  'apple', 'red apple', 'fresh apple', 'milk', 'plate', 'cup', 'spoon',
-  'ticket', 'boarding pass', 'bag', 'suitcase', 'gate A12',
-  'Maya', 'sign in', 'nice to meet you',
-  'latte', 'americano', 'small', 'large', 'for here', 'to go', 'thank you',
+const ASR_COMMON_WORDS = [
+  'hello', 'hi', 'good morning', 'good afternoon', 'how are you',
+  "I'm good", "I'm fine", 'yes', 'no', 'please', 'thank you',
+  "you're welcome", 'here you are', 'say it again', 'what does that mean',
 ];
+const ASR_SCENE_WORDS = {
+  coffee: ['latte', 'americano', 'a latte please', 'an americano please', 'small', 'large', 'for here', 'to go', 'Mia'],
+  kitchen: ['apple', 'red apple', 'fresh apple', 'milk', 'water', 'plate', 'cup', 'spoon', 'more', 'enough'],
+  airport: ['ticket', 'boarding pass', 'bag', 'my bag', 'suitcase', 'gate A12', 'A twelve'],
+  office: ['Maya', 'Nora', 'sign in', 'my name is', "I'm here to see Maya", 'nice to meet you'],
+};
+
+function duplexAsr(taskId) {
+  const scene = Object.keys(SCENE_FACTS).find(key => SCENE_FACTS[key].tasks.has(taskId)) || 'kitchen';
+  // Seeduplex takes ASR under extension, not session. Its context is a JSON
+  // string; hotwords softly bias recognition without replacing Chinese help.
+  // https://www.volcengine.com/docs/6561/2549778 (create/update session)
+  return { extra: {
+    end_smooth_window_ms: 1000,
+    enable_custom_vad: true,
+    enable_asr_twopass: true,
+    context: JSON.stringify({ hotwords: [...ASR_COMMON_WORDS, ...ASR_SCENE_WORDS[scene]].map(word => ({ word })) }),
+  } };
+}
 
 const DUPLEX_TASKS = {
   'coffee-order': 'You are a warm barista. Ask whether the learner would like a latte or an americano. Accept their chosen drink. Acknowledge only that choice, then stop; the app starts the size question. Do not invent an order or ask for payment.',
@@ -245,6 +263,8 @@ function duplexInstructions(taskId, actionDone = false, speechDone = false, cove
   return [
     'Stay in character as a warm person speaking English with a CEFR Pre-A1 adult Chinese beginner.',
     'This is a real conversation, not a quiz or a fixed script.',
+    "Use brief everyday greetings and small talk when they fit the learner's words. For example, answer How are you? with I'm good, thanks! How are you? Respond to I'm fine with Glad to hear it. Do not repeat the task question after every greeting or friendly comment. A short warm response can be a complete turn.",
+    'The app supplies the opening greeting once. Do not restart greetings when a task changes or a session reconnects. Small talk is optional: if the learner gives an order or task answer directly, accept it and continue without making them answer a social question first. Never make up a personal fact, weather, completed action, or order to sound friendly.',
     'The learner may speak about anything and may take unlimited turns. Always respond to the meaning of their latest utterance.',
     'Assume the learner knows almost no English. Simple means clear meaning with common words, not a word-count limit. Use a complete short question or request so they know what you want. Ask one thing, then wait; do not stack questions.',
     'Prefer present tense and explicit objects: "Do you want milk or water?", "Do you want more milk?", "Is this your bag?" Do not use isolated prompts like "Milk?", "More?", or "Here?" that make a beginner guess your intent. Avoid idioms, phrasal verbs, abstract questions and unnecessary past tense. Say "Give me a cup, please" instead of "Could you pass it to me then".',
@@ -354,18 +374,6 @@ function attachDuplexProxy(client) {
         session: {
           model: '1.2.6.1',
           instructions: duplexInstructions(taskId, actionDone, speechDone, coveredGoals, flowState, history, breakfast, coffee),
-          asr: {
-            extra: {
-              // Stream hypotheses immediately; allow a beginner's short pause
-              // before closing their utterance. Item IDs keep turns separate.
-              end_smooth_window_ms: 1000,
-              enable_custom_vad: true,
-              enable_asr_twopass: true,
-              context: {
-                hotwords: ASR_HOTWORDS.map((word) => ({ word })),
-              },
-            },
-          },
           audio: {
             input: { format: { type: 'pcm', sample_rate: 16000 } },
             output: {
@@ -377,7 +385,7 @@ function attachDuplexProxy(client) {
           },
           tools: [],
         },
-        extension: { extra: { enable_proactive_speak: true } },
+        extension: { asr: duplexAsr(taskId), extra: { enable_proactive_speak: true } },
       });
     });
     connection.on('message', (data) => {
@@ -469,6 +477,7 @@ function attachDuplexProxy(client) {
           },
           tools: [],
         },
+        extension: { asr: duplexAsr(taskId) },
       });
       return;
     }

@@ -1435,6 +1435,12 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
     return;
   }
   message.inputSource = inputSource;
+  if (feedback.conversational) {
+    message.status = '继续当前对话';
+    renderDialogue();
+    scheduleIdleNudge();
+    return;
+  }
   if (state.selectedScene === 'coffee' && Coffee.isTask(context.taskId)) {
     const eventId = `${context.evidenceSessionId || state.practiceSession}:${context.messageId}:${context.revision}`;
     let missionFeedback = feedback.missionResult || Coffee.advanceMission(state.coffee, message.text, {
@@ -1465,7 +1471,10 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
     }
     else {
       globalThis.LumaExperience?.noteAnswer(context, 'unconfirmed');
-      if (missionFeedback.reason === 'question' || missionFeedback.reason === 'help') {
+      if (['question', 'help', 'not-ready'].includes(missionFeedback.reason)
+        || (missionFeedback.reason === 'no-decision' && missionFeedback.interpretation?.kind !== 'ambiguous')
+        || (missionFeedback.reason === 'repair-not-resolved'
+          && !Object.keys(missionFeedback.interpretation?.slots || {}).length)) {
         if (missionFeedback.reason === 'help') {
           const supportLevel = missionFeedback.help === 'meaning' || missionFeedback.help === 'repeat' ? 1 : 3;
           globalThis.LumaExperience?.noteHelp?.(supportLevel, `conversation-${missionFeedback.help || 'help'}`);
@@ -1542,11 +1551,20 @@ async function requestLanguageFeedback(question, answer, turnContext = {}) {
   } else if (state.selectedScene === 'coffee' && Coffee.isTask(context.taskId)) {
     const eventId = `${context.evidenceSessionId || state.practiceSession}:${context.messageId}:${context.revision}`;
     const missionResult = Coffee.advanceMission(state.coffee, answer, { eventId, expectedRevision: state.coffee?.revision });
+    if (!missionResult.accepted && DialogueRules.isSmallTalk(answer)) {
+      applyDynamicFeedback({ conversational: true }, context); return;
+    }
     if (missionResult.accepted || missionResult.handled) {
       applyDynamicFeedback({ meaning_valid: missionResult.accepted, missionResult }, context); return;
     }
   } else if (isCurrentTaskQuestion(question) && DialogueRules.matchesTask(context.taskId, answer)) {
     applyDynamicFeedback({ meaning_valid: true }, context); return;
+  }
+  // Let the realtime character answer ordinary greetings without an extra
+  // semantic API round trip or a second, forced task question. Task decisions
+  // (including a greeting to Maya or a polite farewell) take precedence.
+  if (DialogueRules.isSmallTalk(answer) && !DialogueRules.matchesTask(context.taskId, answer)) {
+    applyDynamicFeedback({ conversational: true }, context); return;
   }
   const controller = new AbortController();
   state.pendingFeedback.add(controller);
@@ -2690,6 +2708,7 @@ function handleConversationSupport(text, context, message, { responseStarted = f
 function isCurrentTaskQuestion(question) {
   const task = currentTask(), normalized = normalizedSpeech(question);
   return normalized === normalizedSpeech(task.prompt)
+    || normalized === normalizedSpeech(DialogueRules.openingLine(task.id, task.prompt))
     || Boolean(task.question && normalized === normalizedSpeech(task.question));
 }
 
@@ -2874,7 +2893,8 @@ function scheduleTaskPrompt(taskId, initialDelay) {
       || state.duplexSpeaking || state.duplexAcceptAudio || isConversationPlaybackActive();
     if (blocked) { state.promptTimer = setTimeout(deliver, 180); return; }
     state.promptTimer = null;
-    speak(currentTask().prompt);
+    const pending = state.dialogueHistory.findLast(item => item.pendingPlayback && item.taskId === taskId);
+    speak(pending?.text || currentTask().prompt);
   };
   state.promptTimer = setTimeout(deliver, initialDelay);
 }
@@ -2985,7 +3005,9 @@ function startTask(index, { speakAgain = true } = {}) {
   else connectDuplexSession().catch(() => {});
   state.awaitingPrompt = Boolean(speakAgain && !hasTransitionUtterance);
   if (speakAgain) {
-    showPendingTaskPrompt();
+    const opening = state.dialogueHistory.length === 0
+      ? DialogueRules.openingLine(task.id, task.prompt) : task.prompt;
+    showPendingTaskPrompt(opening);
     if (hasTransitionUtterance) {
       const promptMessage = state.dialogueHistory.findLast(item => item.pendingPlayback && item.taskId === task.id);
       if (promptMessage) {

@@ -144,7 +144,8 @@ const Coffee = (() => {
     const order = normalizeWorld(world);
     if (taskId === 'coffee-order' && order.drink) return `Okay. ${order.drink === 'latte' ? 'A latte' : 'An americano'}.`;
     if (taskId === 'coffee-size' && order.size) return `Okay. A ${order.size} ${order.drink}.`;
-    if (taskId === 'coffee-service' && order.service) return order.service === 'here' ? 'For here. Okay.' : 'To go. Okay.';
+    if (taskId === 'coffee-service' && order.service) return order.service === 'here'
+      ? 'For here. Make yourself comfortable.' : 'To go. I’ll have that ready for you.';
     if (taskId === 'coffee-thanks' && order.received) return 'You’re welcome. Have a nice day!';
     return 'Okay.';
   }
@@ -345,14 +346,14 @@ const Coffee = (() => {
     const empty = { slots: {}, explicitCorrection: false, repairIntent: false, gratitude: false,
       help, ambiguousFields: [], intendedSlots: {}, observedSlots: {}, language, kind: help ? 'help' : 'empty' };
     if (!clean || help) return empty;
-    const politeOrderQuestion = /^(?:can|could|may) i (?:have|get|order)\b/.test(clean);
+    const politeOrderQuestion = /^(?:(?:hi|hello|hey|good morning|good afternoon|good evening)(?: mia)? )?(?:can|could|may) i (?:have|get|order)\b/.test(clean);
     const informationQuestion = !politeOrderQuestion && (/[?？]/.test(raw)
       || /^(?:what|which|where|why|how|is|are|do|does|can|could|would|should)\b/.test(clean)
       || /(?:吗|是不是|是什么)$/.test(clean));
     if (informationQuestion) return { ...empty, kind: 'question' };
     if (/^(?:yes|yeah|yep|okay|ok|sure|好|好的|嗯|可以)(?: please)?$/.test(clean)) return { ...empty, kind: 'ambiguous' };
     const gratitude = !/^(?:no thanks|不用谢|不 谢谢)$/.test(clean)
-      && /\b(?:thanks|thank you)(?: very much| so much| a lot)?\b|谢谢(?:你)?/.test(clean);
+      && /\b(?:thanks|thank you)(?: very much| so much| a lot)?\b|^(?:you too|have a (?:nice|good|lovely) day)$|谢谢(?:你)?/.test(clean);
     let explicitCorrection = /\b(?:actually|sorry|instead|rather|change|changed|make (?:that|it)|i mean|i said|correction|no|not|dont|do not|should be|ordered|asked for)\b|改成|改为|换成|不是|不要|不想要|不对|说错|应该是|其实|还是|我点的是|我要换|(?:^|\s)不(?:\s|$)/.test(clean);
     let repairIntent = explicitCorrection
       || /\b(?:wrong|mistake|isnt right|is not right|thats not right|not what i ordered)\b|错了|不对|不是我点的/.test(clean);

@@ -152,3 +152,12 @@
 - Visual comparison and screenshots are documented in `design-qa.md` and `qa-evidence/`.
 - This pass did not verify real-device microphone audio end to end. The test browser had no usable microphone input; upstream session readiness alone is not an audio quality test.
 - No paywall/payment implementation. No claim of measured retention or learning efficacy; no cloud progress sync added.
+
+## 2026-09-20 自然寒暄与首句识别
+
+- 入场只增加一句简短招呼；任务问题与显示、播放保持一致。直接点单仍可立即推进，没有新增强制寒暄节点。
+- 常见问候和情绪回应在本地识别为日常交流，保留人物正在生成的回应，不调用额外语义接口，也不计为任务答案。其他无选择内容不再被原任务问题强行覆盖；不明确的 yes 仍需澄清杯型等事实。
+- 修正加招呼后任务问题匹配，保留首题中文解释和短答案即时确认；“I am great”不会被当作办公室登记姓名。
+- 豆包 Seeduplex 按当前[官方协议](https://www.volcengine.com/docs/6561/2549778)使用 `extension.asr.extra`，并将热词上下文序列化为字符串。首次连接、场景更新、重新连接采用当前场景词汇；保留中文，不强制替换转写。
+- `npm run check`、266 项 `npm test`、`npm run test:browser` 通过。独立浏览器验证招呼显示/发送一致，Hi 不改订单、不取消人物回应、不重复发送任务问题。
+- 实际豆包接口接受 session.create/session.update。两个独立冷启动会话输入合成语音，最终转写分别为 `Hi, a latte please.` 和 `这句话是什么意思？`。这是接口和合成音频抽查，不是真人手机口音识别准确率评测；后者仍需真机验证。
