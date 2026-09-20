@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: luma-english-demo
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: DOUBAO_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false

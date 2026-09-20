@@ -61,6 +61,12 @@ npm test
 
 这是包含 Node 语音代理的应用，不是纯静态站点。部署时需要支持 WebSocket 的 Node 托管环境，并在托管平台配置 `.env.example` 中的变量；单独启用 GitHub Pages 只能显示界面，不能提供实时语音。
 
+### 给朋友试玩
+
+将仓库推送到 GitHub 后，在 [Render](https://render.com/docs/infrastructure-as-code) 选择 **New → Blueprint**、连接该仓库并部署根目录的 `render.yaml`。首次创建时，在 Render 页面分别填写 `DOUBAO_API_KEY` 和 `DEEPSEEK_API_KEY`；不要把密钥提交到 GitHub。部署成功后，把服务的 `https://…onrender.com` 地址发给朋友，打开页面并允许麦克风即可练习。这个配置运行同一个 Node 服务来提供页面、语义判断和实时语音 WebSocket；GitHub Pages 不能替代它。
+
+Blueprint 默认使用 Render 免费实例供小范围体验。免费实例闲置后会休眠，再次打开可能要等约一分钟；实时语音和语义判断仍会消耗各自 API 的额度。项目目前没有访客账号或总用量配额，请控制分享范围并在服务商后台设置额度。更多部署限制见 [Render 免费服务说明](https://render.com/docs/free)。
+
 ## 对话与收音约定
 
 - 用户授权后持续收音，角色说话和任务切换不关闭麦克风。用户可以主动静音或离开场景；同一浏览器只允许一个页面占用练习收音。
