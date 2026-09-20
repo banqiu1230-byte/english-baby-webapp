@@ -1263,6 +1263,14 @@ function dialogueMarkup(message) {
   return `<article class="dialogue-bubble is-${message.speaker}" data-message-id="${message.id}"><small>${message.speaker === 'user' ? '你' : escapeHtml(message.name || 'Luma')}</small><p>${escapeHtml(message.text)}</p><span class="transcript-status"><i aria-hidden="true"></i><span></span></span></article>`;
 }
 
+function fitRecentDialogue() {
+  recentDialogue.classList.remove('is-condensed');
+  // External names and receipts must stay within the existing subtitle band.
+  if (recentDialogue.scrollHeight > parseFloat(getComputedStyle(languagePanel).maxHeight)) {
+    recentDialogue.classList.add('is-condensed');
+  }
+}
+
 function renderDialogue() {
   const updateList = (container, messages) => {
     const ids = new Set(messages.map(message => String(message.id)));
@@ -1295,6 +1303,7 @@ function renderDialogue() {
   if (dialogueHistory.classList.contains('is-open')) updateList(dialogueHistoryList, state.dialogueHistory);
   languagePanel.hidden = recent.length === 0;
   openDialogueHistory.hidden = state.dialogueHistory.length === 0;
+  fitRecentDialogue();
   languagePanel.scrollTop = languagePanel.scrollHeight;
 }
 
@@ -3569,6 +3578,7 @@ function syncMobileViewport() {
   document.documentElement.style.setProperty('--app-height', `${viewport?.height || window.innerHeight}px`);
   document.documentElement.style.setProperty('--viewport-top', `${viewport?.offsetTop || 0}px`);
   updateSceneGeometry();
+  fitRecentDialogue();
 }
 
 async function getMicrophoneStream(generation = state.captureGeneration) {

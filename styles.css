@@ -2148,22 +2148,23 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--violet-deep
 .scene .language-panel { left: 18px; right: 18px; bottom: calc(var(--scene-dock-bottom) + 124px); max-height: 132px; padding: 0; overflow: hidden; scrollbar-width: none; text-shadow: none; }
 .language-panel::-webkit-scrollbar { display: none; }
 .recent-dialogue { gap: 6px; }
-.dialogue-bubble { max-width: 91%; padding: 12px 14px; border: 0; border-radius: 18px 18px 18px 5px; background: #fffdf7f5; box-shadow: 0 4px 20px #18131013; }
-.dialogue-bubble p { color: #24231f; font-size: 16px; line-height: 1.5; }
-.dialogue-bubble > small { margin-bottom: 4px; color: #898073; font-size: 11px; line-height: 14px; }
-.dialogue-bubble.is-user { border-radius: 18px 18px 5px 18px; background: #eee6fcf5; }
-.dialogue-bubble.is-user > small { color: #88719b; }
-.recent-dialogue .dialogue-bubble { position: relative; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 8px; max-width: calc(100% - 20px); padding: 8px 11px; border-radius: 14px 14px 14px 4px; }
-.recent-dialogue .dialogue-bubble > small { margin: 2px 0 0; font-weight: 600; line-height: 18px; }
-.recent-dialogue .dialogue-bubble p { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; font-size: 15px; line-height: 21px; }
-.recent-dialogue .dialogue-bubble.is-user { margin-right: 20px; border-radius: 14px 14px 4px 14px; }
-.recent-dialogue .dialogue-bubble.is-user p { -webkit-line-clamp: 1; }
-/* Receipt is metadata beside the bubble; the full status remains in history. */
-.recent-dialogue .transcript-status { position: absolute; top: 10px; right: -19px; width: 16px; color: #f5f0ff; opacity: 1; text-align: center; }
+.dialogue-bubble { max-width: 91%; padding: 0; gap: 4px; border: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; }
+.dialogue-bubble p { padding: 10px 13px; border-radius: 16px 16px 16px 4px; color: #24231f; background: #fffdf7f5; font-size: 16px; line-height: 1.5; }
+.dialogue-bubble > small { margin: 0; padding: 0 2px; color: #898073; font-size: 11px; line-height: 14px; }
+.dialogue-bubble.is-user { background: none; }
+.dialogue-bubble.is-user p { border-radius: 16px 16px 4px 16px; background: #eee6fcf5; }
+.dialogue-bubble.is-user > small { justify-self: end; color: #88719b; }
+.recent-dialogue .dialogue-bubble { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 2px; max-width: 100%; }
+.recent-dialogue .dialogue-bubble > small { margin: 0; color: #f5ece0; font-weight: 600; line-height: 12px; text-shadow: 0 1px 4px #382510; }
+.recent-dialogue .dialogue-bubble p { display: -webkit-box; padding: 8px 11px; overflow: hidden; border-radius: 14px 14px 14px 4px; -webkit-box-orient: vertical; -webkit-line-clamp: 3; font-size: 15px; line-height: 21px; }
+.recent-dialogue .dialogue-bubble.is-user p { border-radius: 14px 14px 4px 14px; -webkit-line-clamp: 1; }
+/* Names sit above the message; its receipt sits outside the lower left. */
+.recent-dialogue .transcript-status { justify-self: start; width: 14px; height: 12px; margin-left: 2px; color: #f5f0ff; line-height: 12px; opacity: 1; text-align: center; }
 .recent-dialogue .transcript-status > span { display: none; }
-.recent-dialogue .transcript-status > i { display: block; font-size: 15px; }
+.recent-dialogue .transcript-status > i { display: block; font-size: 12px; line-height: 12px; }
 .recent-dialogue .transcript-status[data-state="confirmed"] { color: #e1edc5; }
 .recent-dialogue .transcript-status[data-state="retry"] { color: #ffe0a1; }
+.recent-dialogue.is-condensed .dialogue-bubble:first-child:not(:last-child) { display: none; }
 .scene > .dialogue-history-button { position: absolute; z-index: 26; right: 18px; bottom: calc(var(--scene-dock-bottom) + 78px); min-height: 44px; margin: 0; padding: 7px 0 7px 10px; border-radius: 0; color: #f2ede5; background: none; font-size: 11px; font-weight: 500; }
 .scene.subtitles-hidden > .dialogue-history-button { visibility: hidden; pointer-events: none; }
 .dialogue-history-panel { border: 1px solid #eee8de; border-radius: 26px 26px 0 0; color: var(--ink); background: var(--paper); }
