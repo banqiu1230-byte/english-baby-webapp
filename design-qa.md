@@ -1,46 +1,179 @@
-# Design QA
+# Luma 本轮设计 QA
 
-## Evidence
+## 2026-09-17：旅程与学习笔记验收
 
-- Source visual truth: `/Users/wufengqing/Desktop/微信图片_20260811162857_138_1.jpg`
-- Rendered implementation: `/Users/wufengqing/Documents/Codex/2026-08-26/11-x20-2/outputs/english-baby-webapp/implementation-home-v2.png`
-- Local implementation: `http://127.0.0.1:4174/`
-- Browser viewport: `827 × 997` CSS px
-- App viewport: `430 × 932` CSS px
-- Device scale factor: `0.9`
-- Source pixels: `1440 × 1920` (a composite containing two framed phone screens)
-- Implementation pixels: `919 × 1108`
-- State: Luma home screen, bottom navigation on Home, first two scenario cards visible
+- 主导航明确分工为“旅程／世界／笔记”：旅程是世界中当前分支的详情，保留此前的大图、地点、当前委托与唯一主动作；世界继续承担分支总览；笔记成为复习和学习证据页。
+- 学习笔记首屏先回答“今天练什么”：页面标题、到期数量、今日复习卡和一个主按钮构成主层级；“还要多练”按最近真实帮助条件列出具体表达与场景；学习成果和最近记录继续向下滚动，不与首屏主任务竞争。
+- 视觉延续暖白、淡紫和近黑主动作。复习卡与需加强卡使用不同的冷暖表面区分；列表仍保持单列，避免手机窄屏挤压。320×568、360×640、390×844 三档均无横向溢出，可见文字最小 11px，按钮高度至少 44px。
+- 隔离测试数据在三档都显示到期复习和需帮助记录；技术错误没有进入弱项。到期项最多预览前 2 项，其余以数量说明，真实的长队列也不会把主动作挤出首屏。单项按钮只打开场景预览，麦克风请求为 0；主复习按钮在确认开始前也未请求麦克风。
+- 截图为 `qa-evidence/learning-notes-320x568.png`、`learning-notes-360x640.png`、`learning-notes-390x844.png`。320×568 首屏可看到下一段标题；390×844 还可看到学习成果的第一行，信息密度随屏高自然增加。
+- 当前截图和数字来自隔离的确定性测试数据，没有改动用户本地学习记录。无 console error、page error 或资源失败；`npm test` 165/165、`npm run check`、`git diff --check` 通过。
 
-## Comparison Method
+## 2026-09-17：世界整屏地图验收
 
-The source composite and the browser-rendered home screen were opened together in one visual comparison. Because the source is a two-device presentation image rather than a single exportable screen, exact pixel normalization would create false precision. The comparison therefore used the visible phone content regions and evaluated visual-language fidelity: typography, spacing rhythm, palette, card construction, imagery treatment, navigation, and copy hierarchy.
+- 世界页从“地图卡片＋长进度列表”改为底栏以上整屏地图。功能标题、五个地点和当前旅程模块都在同一张空间地图上，页面本身不滚动。
+- 原 C01–C04 长列表已删除；底部小模块动态显示进度和下一事件，点击只打开预览。机场节点与当前旅程模块实测均为 `sceneSheet aria-hidden=false`、`experience aria-hidden=true`、麦克风请求 0。
+- 320×568、360×640、390×844 三档真实浏览器布局均为 document 宽度等于 viewport 宽度；标题、五个节点、旅程模块两两无碰撞；地图按钮命中区域不小于 44px；可见文字最小 11px。
+- 对应证据为 `qa-evidence/world-fullscreen-320x568.png`、`world-fullscreen-360x640.png`、`world-fullscreen-390x844.png`。最终页面 console error 为空。
+- `npm test` 160/160、`npm run check`、`git diff --check` 通过。本节只验收世界页外层，不代表真人麦克风、学习效果或长期留存通过。
 
-The full view was sufficient for the primary comparison because the reference and implementation both render the key typography, hero card, colored content cards, and bottom navigation at readable sizes. Focused checks were additionally performed on the home hero/card treatment, the black dock navigation, the growth metrics/list, and the profile metrics/settings list through live browser screenshots.
+状态更新：2026-09-15。**当前仅下列自动测试与 CUA 操作范围已验证，不作一概 passed 的结论。**
 
-## Findings
+`npm run check` 通过，`npm test` **100/100 通过**。CUA 已核验 390px 手机宽度的探索页、中文文字求助、等待控制、刷新恢复及完整早餐文字链和结算。真实麦克风在当前 CUA 环境不可用；不代表真人插话、真机语音、教学效果或商店发布已验收。
 
-- No actionable P0, P1, or P2 findings remain.
-- Typography: the implementation uses an available rounded/geometric system stack with the source's heavy black hierarchy and muted secondary copy. The exact commercial typeface from the screenshot is unavailable; the fallback is an acceptable P3 difference.
-- Spacing and layout: large symmetric radii, generous white space, compact colored cards, and the persistent black pill navigation match the source's rhythm without obscuring Luma's scene-learning content.
-- Colors and tokens: flat lavender, orange, blue, green, cyan, black, and soft-white tokens reproduce the source palette. App-owned cards do not combine filled backgrounds with decorative outlines.
-- Image quality: existing Luma scene artwork is kept sharp and is cropped into rounded photo regions instead of being replaced with fake 3D/CSS artwork.
-- Copy: product-specific Chinese learning copy is preserved; fitness-specific labels from the source are intentionally not copied.
-- Interaction: Home, Scene, Growth, Profile navigation and the primary scene entry were exercised. The immersive scene opens and retains its working controls.
-- Console: no browser `error`, `warning`, or `warn` entries were present after navigation and scene-entry checks.
+## 历史：2026-09-07 视觉依据与比较方式
 
-## Comparison History
+本节至“比较与修复记录”为当时版本的验收记录，截图、尺寸和结论不自动适用于 2026-09-15 当前版本。
 
-### Pass 1
+- 选定方向：用户选择方案 1，并要求进一步增强沉浸感；以随后生成的同方向精修稿为视觉依据。
+- 原始参考：本地留存的生成稿，853×1844 px。
+- 标准化参考：`qa-evidence/reference-390.png`，390×844 px，仅缩放用于检查，原始图保留。
+- 实现：`qa-evidence/home-390.png`，390×844 px；CSS viewport 390×844，截图一像素对应一 CSS 像素。
+- 状态：新用户、今天页、无进行中的场景，暖白主题。
+- 将标准化参考与实际截图同时提交到同一个图像比较输入，逐项检查布局、文字、颜色、图像和按钮。没有把不同尺寸的桌面截图作为手机一致性的证据。
+- 额外手机检查：375×667、430×932。对应 `home-375.png`、`home-430.png`、`help-375.png`。
+- 所有图片路径相对本项目的 `qa-evidence/`；该测试证据目录不随公开体验版发布。
 
-- Earlier findings: none at P0/P1/P2 after the implemented style transfer.
-- Visual evidence: the rendered home uses the source's flat high-saturation cards, rounded geometric typography, soft-white canvas, low elevation, and black dock with a white active segment.
-- Result: accepted without a corrective iteration.
+## 历史：2026-09-07 五项视觉检查
 
-## Follow-up Polish
+| 检查面 | 结果 |
+| --- | --- |
+| 字体与排版 | 中文大标题保持两行，副标题 14px；使用现有 Avenir/PingFang 字体栈。页面标题、主操作、解释层级清晰。Luma 字标较参考更厚，列为 P3，可后续统一品牌字标资产。 |
+| 间距与比例 | 390px 实测 hero y=204.22、高363.75；主按钮 y=621.97、高56；复练行 y=713.97、高55；导航 y=774、高70，与参考主要区域一致。375px 短屏无水平溢出，主按钮与导航完整；430px 没有拉宽为桌面多列。 |
+| 色彩与组件 | 暖白底、深色主按钮、淡紫学习状态。完成页旧的蓝绿黄三块已替换成淡紫统计和细分隔，避免与场景抢注意力。 |
+| 图像质量 | 使用单独生成并检查的人物厨房图，未用整张设计稿充当页面。角色、暖光与厨房延续参考。桌面改为牛奶、水和杯子，对应真实练习目标；这是明确的内容适配。保持原场景物品坐标，未为视觉改动破坏交互。 |
+| 文案与内容 | 真实的三场景入口，无虚构已掌握百分比。动作、文字、辅助英语与独立英语分开；完成页可显示“0 次英语开口”。不包含付费、订阅或充值入口。 |
 
-- P3: bundle a licensed geometric rounded font if exact cross-device type rendering becomes a release requirement.
+完整图中所有文字与控件均可读，没有需要额外放大的密集图表。对复杂状态单独检查了帮助面板和最终回顾页，而不是只检查首页。
 
-## Final Result
+## 历史：2026-09-07 比较与修复记录
+
+1. **P2：首页人物区域偏小。** 初次390px检查图像高约281px，起点约234px，主按钮提前到583px。调整副标题/上下间距和hero高度后，重新捕获并与标准化参考共同比较，结果见 `home-390.png`。
+2. **P1：展开示范后场景被焦点隐式滚动。** 早期 app shell 的隐藏滚动容器被焦点推移，scene y=-253。将外壳设为 overflow:clip，介绍/帮助内容独立滚动。375px重测 scene y=0、help y=0、shell.scrollTop=0，例句与关闭按钮可见，见 `help-375.png`。
+3. **P2：回顾统计颜色与字号不一致。** 旧三格色块过强、数字过小。改为淡紫统一底色，数值12px，增加与证据卡间距。`review-390.png` 为修复前，`review-final-390.png` 为修复后，已重新目视检查。
+4. **P1：新模块未被静态服务器允许加载。** 增加两个学习模块的明确静态白名单，重启后验证成长页与恢复行为确实接通。
+5. **P1：语音连接失败同时阻止打字。** 解耦输入路径，保留明确的连接提示；实际用文字完成最后一步，随后回顾保持0口语。
+
+当时记录中的上述问题已处理；本轮未全面复验所有历史截图和状态，不能沿用“无视觉阻断项”作为当前总体结论。
+
+## 当前实际交互验证（2026-09-15）
+
+补充走查：机场以 `Here you are.` → `Yes, it is mine.` → `A12.` 完成，回顾点击“换个场景试一试”进入办公室。办公室以 `Maya.` → `My name is Li.` → 等候信息自动衔接 → `Nice to meet you, too.` 完成，回顾为4步骤、0英语开口。全部使用文字降级，没有点物品。
+
+本轮额外检查375×667：探索页标题、筛选与固定导航无重叠，document无水平溢出；成长页标题和证据列表无重叠。证据为 `qa-evidence/explore-375-20260915.png`、`qa-evidence/growth-375-20260915.png`。390px探索截图为 `qa-evidence/explore-390-20260915.png`，已与用户9月7日重叠截图放在同一图像输入比较；用户截图内应用宽约387px，因此这是缺陷修复比较，不是逐像素复刻验收。
+
+| 范围 | 当前事实 | 验证层级 |
+| --- | --- | --- |
+| 手机探索页 | 390px 手机宽度下，标题与筛选没有重叠 | 本轮 CUA 目视核验；不外推到所有真机尺寸 |
+| 中文求助 | 文字输入“什么意思”得到解释，“怎么说”得到示范；“等一下”不推进任务 | 本轮 CUA 文字路径；不等于实际语音识别通过 |
+| 恢复 | 刷新后恢复到早餐第二步，先前选择的 Milk 保留 | 本轮 CUA 操作核验 |
+| 任务推进 | 当前需要作答的任务由语言回应推进；杯子和饮料自动表现语义结果，不能点杯、拖拽或点答案通关。办公室等候片段自动继续，不据此判断已听懂 | 当前代码核对 |
+| 完整早餐文字链与完成页 | 刷新恢复到 2/3 且 Milk 保留；文字 `Here you are` 推进到 3/3；先输入“怎么说”看到 Yes/No 示范，再输入 `No, thanks`，`data-amount=enough`；最终回顾为 **3 个生活步骤、0 次自主表达、0 次英语开口** | 本轮 CUA 全文字路径核验；不再使用旧版操作统计 |
+| 自动回归 | `npm run check` 通过，`npm test` **100/100 通过**；最新覆盖开场前出声、同题乱序 final、已播回复不截断、服务端示范保留原问题、控制词不计为姓名、最多两次有限沉默提示、回顾进入承诺的下一场景 | 自动测试，包含模拟语音/时钟/网络条件 |
+
+历史说明：上轮做过完整早餐文字路径；早期 2026-09-07 记录还包含点杯、操作统计等旧机制。当前整链结论依据上表所列本轮 CUA 结果，不沿用历史操作统计。本文未添加未经提供的截图路径或浏览器零错误结论。
+
+## 当前剩余验证边界
+
+本轮完整早餐文字链已通过 CUA 核验，机场与办公室完整路径仍需另验。当前 CUA 麦克风不可用，未验收真人在角色讲话时插话的完整采集、识别、承接链路。真机麦克风与语音全流程、真实软键盘/系统安全区、读屏器完整跑课、弱网长期可靠性仍需补验。复练日期、辅助分类、旧结果隔离、存储异常有自动测试；尚无 D1/D7 留存及纵向学习效果证据，也无完整 CEFR 课程或账户云同步。
+
+历史 P3 待办：统一字标资产与次要图标色值、进一步压缩 hero 文件；本轮未将其重新判定为完成或阻断。
+
+---
+
+## 2026-09-16：生活地图外层框架验收
+
+本节覆盖本次“冒险／世界／足迹”手机端外层改造。结论只适用于外层视觉、导航、只读浏览和已有任务入口；不把这次通过扩展为真人麦克风、商店发布、D1/D7 留存或学习效果已被证明。
+
+### Source of truth 与截图
+
+- 用户选定并确认的精修方向：本地留存的生成稿，853×1844；项目内参考副本见下行。
+- 项目内参考副本：`qa-evidence/adventure-home-reference.png`，853×1844。
+- 首页实现：`qa-evidence/adventure-home-390x844.jpg`，CSS viewport 390×844，截图 390×844，1×。
+- 短屏实现：`qa-evidence/adventure-home-360x640.jpg`，CSS viewport 360×640，截图 360×640，1×。
+- 同屏比较：`qa-evidence/adventure-home-comparison.jpg`，左为选定方向缩放到 390×844，右为真实实现。
+- 其它页面：`qa-evidence/world-390x844.jpg`、`qa-evidence/footprints-390x844.jpg`、`qa-evidence/settings-390x844.jpg`。
+- 截图均来自 Codex in-app browser 的真实本地页面 `http://127.0.0.1:4174/?v=life-map-20260916`，没有用整张设计稿伪装实现。
+
+### 全图与重点区域比较
+
+| 检查面 | 结果 |
+| --- | --- |
+| 结构与比例 | 保留参考的“大地图＋上浮任务卡＋三项底栏”结构。390×844 首屏完整看到当前位置、目标、主按钮和底栏；360×640 同样无需滚动即可开始当前委托。 |
+| 字体与层级 | Luma／当前旅程／地图节点／当前委托／目标／主动作层级清楚。任务标题 23–28px，正文 14px，导航 11px；没有用 9–10px 小字承载唯一任务目标。 |
+| 色彩与表面 | 暖白、木色和自然光延续选定方向；紫色只用于当前位置、完成节点和选中导航。任务卡与图片分层清楚，深色 CTA 是首屏唯一强动作。 |
+| 图像 | 新的 1086×1448 咖啡街区图作为独立场景资产；图内没有 UI、文字、虚线、热点圈、物体白描边或水印。路线状态、文字和图标全部由可访问 DOM 呈现。 |
+| 动态内容 | 参考图是固定 C02，真实实现按本地存档显示；验收截图因现有 C01 checkpoint 显示“继续委托 · C01”。这是预期数据差异，不是视觉漏改。 |
+| 世界 | 旅程封面、C01–C04 路线、已有短练习和“筹备中”的长旅程分层明确。未制作内容没有伪装成可开玩按钮。 |
+| 足迹 | “走过的经历／我会的事”可切换；经历与证据均来自已有记录。旧文字记录明确标为非语音，不产生虚假独立能力。 |
+| 设置 | 从头像进入，底栏隐藏；返回后回到原 tab。普通设置没有创建学习 session 或启动语音。 |
+
+### 交互与数据边界
+
+- 世界页点击“查看旅程简报”后，`sceneSheet` 打开且 `experienceActive=false`；路线状态保持 `current / complete / complete / available`，未直接启动任务。
+- 只有详情内“开始这一事件”才会提交 scene／mission。首页主按钮仍唯一调用 `LumaExperience.startHome()`，所以 checkpoint、C04 variant 和帮助记录沿原恢复链继续。
+- 390×844、360×640 均确认无横向溢出，主 CTA 未被 70px 底栏遮挡；三项底栏均有至少 54px 控制高度。
+- 足迹两种视图切换不调用 evidence 的 `note*` 方法。设置页的 `aria-hidden` 底栏状态为 `true`，返回冒险后恢复为 `false`。
+- 世界预览、足迹与设置走查期间没有麦克风权限请求；任务开始前没有语音连接 UI。
+- 最终本地页面控制台错误列表为空。
+
+### 比较和修复记录
+
+1. 初版把所有已完成节点优先画成完成态，遇到旧 checkpoint 时会让首页“继续 C01”与地图“C01 已完成”冲突。改为活动 checkpoint 优先呈现“现在”，其余完成记录保持不变。
+2. 原有 `openSheet()` 在预览时立即改写 `selectedScene`，世界卡片也会直接开局。改为临时 `sheetSelection`；仅明确点击详情 CTA 后提交状态。
+3. 原有四项底栏及独立“我的”页改为三项底栏；设置移到头像，并增加返回原 tab 与每个 tab 的滚动位置记忆。
+4. 360×640 初检后保留地图 58dvh、任务卡最小 206px、CTA 50px，使短屏仍完整露出主动作和导航；次要复练卡下移到首屏之外。
+5. 第一批世界和设置截图捕获到 240–300ms 页面切换过渡的重影；等待过渡稳定后重新捕获并覆盖，最终证据文件无重影。
+6. 首页原来会让“到期复练”抢占当前咖啡故事。改为未完成咖啡旅程继续作为主线，复练保留在次要卡；新增自动测试保证新用户从 C01 开始。
+
+### 自动与浏览器验证
+
+- `npm test`：150/150 通过。
+- `npm run check`：通过。
+- `git diff --check`：通过。
+- 真实浏览器检查：390×844 首页、世界、足迹、设置；360×640 首页；世界只读预览；足迹 tab；头像设置进入与返回；最终页面零 console error。
+- 没有在这次外层验收中点击“开始这一事件”并接受麦克风权限，因此真人语音仍沿用现有验证边界。
+
+final result: passed
+
+## 2026-09-16：世界地图与对话防卡死复核
+
+### 本轮视觉与交互结论
+
+- 冒险页已移除 C01–C03 路线叠层，首屏只保留沉浸场景、动态当前地点、当前委托与继续按钮；它不再与世界页重复。
+- 世界页使用正式 1086×1448 地图素材，五个节点与图中生活区域对应：早餐左上、机场右上、咖啡中心、办公室右下、未来城市左下。当前旅程用紫色双环和 `3 / 4` 进度突出，其他地点仍可快速预览。
+- 页头直接给出“生活地图 · 5 个地点”“街角咖啡店进行中”和动态完成数，替换了空泛的生活口号。
+- 机场节点实测只打开详情 sheet；页面没有进入沉浸场景，也没有出现麦克风权限请求。
+- 320×568、360×640、390×844 均无水平溢出；390px 地图为 350×448，320px 地图为 288×448，节点之间没有几何碰撞。可见文字计算字号下限为 11px。
+- 320×568 初检时继续按钮被底栏部分遮挡；将极短屏 hero 最小高度从 360px 调整为 320px 后，按钮底部为 495px、底栏顶部为 498px，完整可用。
+
+### 对话流结论
+
+- 自然求助、提示开合、人物回复期间提前回答下一步、识别超时、模型无回复、断流、重连、任务切换与断点恢复均有回归覆盖。
+- 额外加入 8 秒冻结音频时钟恢复与 90 秒人物回合绝对上限，避免系统音频挂起或供应商持续小包造成永久占用。
+- `npm test` 160/160、`npm run check`、`git diff --check` 均通过。
+- 项目没有安装 Playwright，因此仓库内 `npm run test:browser` 未执行；真实麦克风和供应商端到端仍需设备验收，本结论不外推为语音识别准确率证明。
+
+final result: passed
+
+## 2026-09-16：截图反馈修复验收
+
+### 问题与修复
+
+1. 用户截图证明咖啡任务出现跨步骤错位：页面仍为 `1 / 4`，Mia 已提前询问杯型；进入 `2 / 4` 后又重复同一问题。根因是饮品写入后、任务索引切换前暴露了下一步 prompt。现在过渡阶段只确认当前选择，下一问题由新步骤唯一发起。
+2. `Yes.` 没有被状态机识别为 Americano；截图产生误解是因为真正被采纳的回答被最近两条消息挤出。现在被采纳的用户回答会保留并标记“已确认”。
+3. 中文元问题过去被 `missionFeedback.prompt` 覆盖成原题复读。现在 question 类型不调用本地 `speak()`，让实时角色直接承接用户问题。
+4. 首页地图节点补充连接与完成进度，节点靠近路线，节点文字增加深色半透明底板；320×568 下重新排列，C03 与当前位置卡不再重叠。
+5. 世界页标题改为“选择要练习的生活场景”，说明改为“查看路线和完成进度，点进事件继续挑战。”
+6. 全部 7–10px 字号提升至至少 11px；两处旧容器的 `font-size: 0` 也已移除。
+
+### 验证范围
+
+- 真实浏览器：320×568、360×640、390×844；首页、世界和足迹；全部可见节点在画布内，无横向溢出。
+- 真实 DOM 共检查 208 个直接文字节点，计算字号最小值为 11px；CSS、HTML 与 JS 静态扫描无 0–10px 字号声明。
+- 320×568 首页主按钮经一次自然滚动完整可达；路线节点与当前位置卡之间保留间隔。
+- `npm test`：154/154 通过；新增咖啡过渡、裸 `Yes.`、中文元问题与过渡回复防护测试。
+- `npm run check`、`git diff --check`：通过。
+- 未在本轮接受麦克风权限，未把代码回归等同于真人语音设备验收。
 
 final result: passed

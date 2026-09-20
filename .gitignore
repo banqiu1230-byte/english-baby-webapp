@@ -4,3 +4,6 @@
 node_modules/
 .DS_Store
 npm-debug.log*
+qa-evidence/
+assets/coffee/*-original.png
+assets/coffee/manifest.json

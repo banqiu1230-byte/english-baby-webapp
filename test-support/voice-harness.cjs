@@ -9,15 +9,24 @@ const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const rules = require(path.join(root, 'dialogue-rules.js'));
 const VoiceRuntime = require(path.join(root, 'voice-runtime.js'));
 const Breakfast = require(path.join(root, 'breakfast.js'));
+const Coffee = require(path.join(root, 'coffee.js'));
 const declarations = [...app.matchAll(/^(?:async )?function (\w+)\([^]*?^\}$/gm)];
 const functions = new Map(declarations.map(match => [match[1], match[0]]));
+function sourceNumber(name) {
+  const match = app.match(new RegExp(`^const ${name} = (\\d+);`, 'm'));
+  assert.ok(match, `Missing numeric app constant: ${name}`);
+  return Number(match[1]);
+}
 
 function node() {
   const classes = new Set(['is-active']);
+  const attributes = new Map();
   return { dataset: {}, style: {}, hidden: false, textContent: '',
     classList: { contains: name => classes.has(name), add: (...names) => names.forEach(n => classes.add(n)),
       remove: (...names) => names.forEach(n => classes.delete(n)), toggle() {} },
-    setAttribute() {}, removeAttribute() {} };
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    getAttribute(name) { return attributes.get(name) ?? null; },
+    removeAttribute(name) { attributes.delete(name); } };
 }
 
 function harness(overrides = {}) {
@@ -33,7 +42,7 @@ function harness(overrides = {}) {
     close() { this.readyState = 3; }
   }
   const sandbox = {
-    console, Promise, Set, Map, Math, Float32Array, Int16Array, Buffer, Breakfast,
+    console, Promise, Set, Map, Math, Float32Array, Int16Array, Buffer, Breakfast, Coffee,
     isBreakfastScene: () => false, renderBreakfast() {},
     atob: value => Buffer.from(value, 'base64').toString('binary'),
     Date: class extends Date { static now() { return now; } },
@@ -48,6 +57,9 @@ function harness(overrides = {}) {
     voiceStatus: getNode('voiceStatus'), preferences: { speechRate: '慢速' }, AbortController,
     TURN_PHASE: { LISTENING: 'listening', CHARACTER_SPEAKING: 'character-speaking' },
     BARGE_IN_GUARD_MS: 80, CONTINUATION_WINDOW_MS: 1200,
+    CHARACTER_AUDIO_QUIET_MS: sourceNumber('CHARACTER_AUDIO_QUIET_MS'),
+    CHARACTER_CLOCK_STALL_MS: sourceNumber('CHARACTER_CLOCK_STALL_MS'),
+    CHARACTER_TURN_MAX_MS: sourceNumber('CHARACTER_TURN_MAX_MS'),
     currentTask: () => task, currentSceneConfig: () => ({ tasks: [task] }),
     scene: getNode('scene'), experience: getNode('experience'), micButton: getNode('micButton'), micLabel: getNode('micLabel'),
     renderDialogue() {}, setTurnPhase() {}, setMode() {}, ensureSceneVoiceIsOpen() {},
@@ -58,6 +70,9 @@ function harness(overrides = {}) {
     publishDuplexSubtitle: () => false,
     showToast(text) { effects.push({ type: 'toast', text }); },
     characterHintLine: () => 'One word is okay.', recordHint() {},
+    speechSupportForTask: () => ({ meaning: '她在问你找到了什么。', model: 'Milk.' }),
+    handleConversationSupport: () => false,
+    latestCharacterText: () => [...sandbox.state.dialogueHistory].reverse().find(item => item.speaker === 'luma')?.text || '',
     speakCharacterCue(text) { effects.push({ type: 'cue', text }); },
     ...overrides,
   };
@@ -86,20 +101,21 @@ function harness(overrides = {}) {
     for (let i = 0; i < 5; i++) await Promise.resolve();
   }
   const shared = ['sceneVoiceIsOpen','captureUserTurnContext','setVoicePhase','liveTaskModeLabel',
-    'taskNeedsAction','taskNeedsSpeech','isActionRequestLine','isActionAcknowledgement','normalizedSpeech',
+    'taskNeedsAction','taskNeedsSpeech','isActionRequestLine','isActionAcknowledgement','normalizedSpeech','isCurrentTaskQuestion',
     'transcriptItemId','responseEventId','responseQuestionId','rememberBounded','beginExpectedResponse',
-    'retireExpectedResponse','acceptResponseEvent',
+    'retireExpectedResponse','acceptResponseEvent','resolveLearnerBeforeReply','learnerDecisionPending',
     'acceptTranscriptEvent',
-    'clearLocalSpeechTurn','armVoiceTurnWatchdog','finalizeLearnerTranscript',
+    'clearLocalSpeechTurn','armVoiceTurnWatchdog','finalizeLearnerTranscript','stageTransitionUtterance','acknowledgeCompletedTurn',
     'beginLocalSpeechTurn','clearReplyTimeout','armReplyTimeout','clearCharacterTurnWatchdog',
     'clearUserTurn','stopDuplexPlayback','isDuplexPlaybackActive',
     'isConversationPlaybackActive','isConversationTurnPending','scheduledCharacterLineBlocked',
     'clearIdleNudge','scheduleIdleNudge','sendDuplex','openLearnerTurn','cleanupSpeechCaptureUi',
-    'addDialogueMessage','extractDuplexText',
+    'addDialogueMessage','extractDuplexText','showUnplayedCharacterLine','showPendingTaskPrompt',
     'armCharacterTurnWatchdog','connectDuplexSession','settleFailedDuplexTurn',
-    'stopSpeechPlayback','updateLearnerTurn','confirmLearnerTurn','syncVoiceStatus','flushMicrophoneBuffer'];
+    'stopSpeechPlayback','updateLearnerTurn','confirmLearnerTurn','syncVoiceStatus','flushMicrophoneBuffer',
+    'microphoneWaitsForCharacter','flushDeferredVoiceEvents'];
   load(shared);
-  return { c: sandbox, s: sandbox.state, task, effects, timers, advance, load };
+  return { c: sandbox, s: sandbox.state, task, effects, timers, advance, load, now: () => now };
 }
 
 

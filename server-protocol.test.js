@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 const source = fs.readFileSync(require.resolve('./server.js'), 'utf8');
 const attach = source.match(/^function attachDuplexProxy\([^]*?^\}$/m)[0];
+const normalizeCoffeeState = source.match(/^function normalizeCoffeeState\([^]*?^\}$/m)[0];
 function proxy() {
   const sockets = [], timers = [], instructionCalls = [];
   class Socket extends EventEmitter {
@@ -14,12 +15,12 @@ function proxy() {
     close() { this.closed++; }
     terminate() {} ping() {}
   }
-  const context = vm.createContext({ Buffer, Breakfast: require('./breakfast'), WebSocket: Socket, crypto: {randomUUID:()=> 'test-id'},
+  const context = vm.createContext({ Buffer, Breakfast: require('./breakfast'), Coffee: require('./coffee'), WebSocket: Socket, crypto: {randomUUID:()=> 'test-id'},
     console:{log(){}},process:{env:{DOUBAO_API_KEY:'test-only'}},DUPLEX_URL:'wss://test.invalid',DUPLEX_TASKS:{milk:'test'},ASR_HOTWORDS:[],
     duplexInstructions:(...args)=> {instructionCalls.push(args);return 'test';},cleanText: text=>text,
     setTimeout: fn=> {timers.push(fn);return 1;},setInterval:()=>1,clearInterval() {},
   });
-  vm.runInContext(attach,context);
+  vm.runInContext(`${normalizeCoffeeState}\n${attach}`,context);
   const client = new Socket(); sockets.length = 0;
   context.attachDuplexProxy(client);
   client.emit('message', Buffer.from('{"type":"start","taskId":"milk","speechRate":"慢速"}'), false);
@@ -50,4 +51,21 @@ test('breakfast choices reach dialogue context and invalid world values are sani
   assert.deepEqual(JSON.parse(JSON.stringify(instructionCalls.at(-1)[6])),{drink:'water',cupPlaced:true,amount:'enough'});
   client.emit('message',Buffer.from(JSON.stringify({type:'task.update',breakfast:{drink:'coffee',cupPlaced:false,amount:'overflow'}})),false);
   assert.deepEqual(JSON.parse(JSON.stringify(instructionCalls.at(-1)[6])),{drink:null,cupPlaced:false,amount:null});
+});
+
+test('coffee choices reach dialogue context without out-of-order or invalid values', () => {
+  const {client,instructionCalls}=proxy();
+  client.emit('message',Buffer.from(JSON.stringify({type:'task.update',coffee:{drink:'latte',size:'small',service:'to-go',received:false}})),false);
+  assert.deepEqual(JSON.parse(JSON.stringify(instructionCalls.at(-1)[7])),{drink:'latte',size:'small',service:'to-go',received:false});
+  client.emit('message',Buffer.from(JSON.stringify({type:'task.update',speechRate:'正常'})),false);
+  assert.equal(instructionCalls.at(-1)[7].service,'to-go');
+  client.emit('message',Buffer.from(JSON.stringify({type:'task.update',coffee:{drink:'milk',size:'large',service:'here',received:true}})),false);
+  assert.deepEqual(JSON.parse(JSON.stringify(instructionCalls.at(-1)[7])),{drink:null,size:null,service:null,received:false});
+});
+
+test('the voice proxy ignores removed text-answer events', () => {
+  const {client,upstream}=proxy();
+  upstream.emit('message',Buffer.from('{"type":"session.created"}'));
+  client.emit('message',Buffer.from('{"type":"user.text","text":"A latte, please."}'),false);
+  assert.equal(upstream.sent.some(event=>event.type==='conversation.item.create'),false);
 });

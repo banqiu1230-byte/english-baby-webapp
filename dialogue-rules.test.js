@@ -28,6 +28,42 @@ test('short beginner answers still count when they clearly name the goal', () =>
   assert.equal(matchesTask('gate-a12', 'A12.'), true);
   assert.equal(matchesTask('ticket', 'Here you are.'), true);
   assert.equal(matchesTask('office-purpose', 'Maya.'), true);
+  assert.equal(matchesTask('office-signin', 'Li.'), true);
+  assert.equal(matchesTask('office-signin', 'My name is Li.'), true);
+  assert.equal(matchesTask('office-signin', 'Hello there.'), false);
+});
+
+test('natural ownership confirmations and denials survive spoken hesitation', () => {
+  for (const text of [
+    "Uh nothing yes it's my bag", "Yes, it's my bag.", 'Um, it is mine.',
+    "Well, that's my bag, thanks.", 'No.', "No, it's not my bag.",
+    "Uh, no, it isn't mine.", "This isn't my bag.",
+  ]) assert.equal(matchesTask('bag', text), true, text);
+  for (const text of [
+    'Nothing.', "Is it my bag?", "Yes, I don't know.", 'Yes, I hear you.',
+    'Not sure if it is mine.', "Yes, it's my ticket.", "我不懂 yes it's my bag",
+    "Yes, it's my bag but it is not mine.", 'My bag is heavy.',
+    "No, it's my bag.", "Yes, it isn't mine.", "It's not not mine.",
+    "No, it is not not my bag.", "Maybe it's mine.", "Yes？",
+  ]) assert.equal(matchesTask('bag', text), false, text);
+});
+
+test('edge fillers never remove negation, uncertainty or a request for help', () => {
+  assert.equal(matchesTask('milk', 'Um, milk please.'), true);
+  assert.equal(matchesTask('gate-a12', 'Uh, gate A12.'), true);
+  assert.equal(matchesTask('ticket', 'Well, here you are.'), true);
+  for (const text of ['Uh, milk?', 'Um, not milk.', 'Milk 我不知道怎么说', 'Um, what does milk mean?'])
+    assert.equal(matchesTask('milk', text), false, text);
+  for (const text of ['Uh', 'Um', 'Hmm']) assert.equal(matchesTask('office-signin', text), false, text);
+});
+
+test('agreement never names an object, person or destination in another task', () => {
+  for (const taskId of ['ticket', 'gate-a12', 'office-purpose', 'office-signin', 'office-greeting']) {
+    for (const text of ['Yes.', 'Yep.', 'Nope.', 'Uh huh yes hear you', 'Yes, I hear you.'])
+      assert.equal(matchesTask(taskId, text), false, `${taskId}: ${text}`);
+  }
+  for (const text of ['Maybe.', 'Perhaps.', 'Well.', 'Oh.'])
+    assert.equal(matchesTask('office-signin', text), false, text);
 });
 
 test('physical tasks advance only after speech and action', () => {
@@ -58,6 +94,12 @@ test('transition replies cannot end a scene early or open a competing topic', ()
     stage: 'task-complete',
     hasMoreTasks: true,
   }), '');
+  assert.equal(transitionReplyReplacement({
+    text: 'Would you like a small or a large americano?',
+    stage: 'task-complete',
+    hasMoreTasks: true,
+    taskAcknowledgment: 'Okay. An americano.',
+  }), 'Okay. An americano.');
 });
 
 test('gentleRecast fixes only small beginner errors with a safe correction', () => {

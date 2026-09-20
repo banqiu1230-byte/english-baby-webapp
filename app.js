@@ -16,6 +16,7 @@ const reviewScreen = document.querySelector('#reviewScreen');
 const completionCelebration = document.querySelector('#completionCelebration');
 const repeatSceneButton = document.querySelector('#repeatScene');
 const scene = document.querySelector('#scene');
+const objectLayer = document.querySelector('.object-layer');
 const apple = document.querySelector('#apple');
 const hotspots = [...document.querySelectorAll('.scene-hotspot')];
 const taskFocus = document.querySelector('#taskFocus');
@@ -63,42 +64,97 @@ const profileHeard = document.querySelector('#profileHeard');
 const profileActions = document.querySelector('#profileActions');
 const profileSpoken = document.querySelector('#profileSpoken');
 const voiceStatus = document.querySelector('#voiceStatus');
-const textAnswerForm = document.querySelector('#textAnswerForm');
-const textAnswerInput = document.querySelector('#textAnswer');
-const textAnswerToggle = document.querySelector('#textAnswerToggle');
+const coffeeMissionBoard = document.querySelector('#coffeeMissionBoard');
+const coffeeMissionButtons = [...document.querySelectorAll('[data-coffee-mission]')];
+const coffeeMissionProgressLabel = document.querySelector('#coffeeMissionProgress');
+const coffeeMissionBrief = document.querySelector('#coffeeMissionBrief');
+const missionHud = document.querySelector('#missionHud');
+const missionHudCode = document.querySelector('#missionHudCode');
+const missionHudTitle = document.querySelector('#missionHudTitle');
+const missionHudProgress = document.querySelector('#missionHudProgress');
+const orderSlots = document.querySelector('#orderSlots');
+const missionResult = document.querySelector('#missionResult');
+const missionResultTags = document.querySelector('#missionResultTags');
 const transcriptLedger = new VoiceRuntime.TranscriptLedger();
-const microphoneBuffer = new VoiceRuntime.PcmBuffer();
+// A character line may outlast the normal reconnect buffer. Audio stays only
+// in memory; explicit mute/exit/reset still discards it.
+const microphoneBuffer = new VoiceRuntime.PcmBuffer(16000 * 2 * 60);
+const CHARACTER_AUDIO_QUIET_MS = 8000;
+const CHARACTER_CLOCK_STALL_MS = 8000;
+const CHARACTER_TURN_MAX_MS = 30000;
 
 let sheetTrigger = null;
+let sheetSelection = null;
+let profileReturnView = 'home';
+const viewScrollPositions = new Map();
 let appToastTimer = null;
-const preferences = {
-  speechRate: localStorage.getItem('luma-speech-rate') || '慢速',
-  rescue: localStorage.getItem('luma-rescue') || '按需显示',
-};
+const preferences = { speechRate: '慢速', rescue: '按需显示' };
+
+function loadDeferredImages(root) {
+  root?.querySelectorAll?.('img[data-src]').forEach((image) => {
+    if (!image.src) image.src = image.dataset.src;
+    image.removeAttribute('data-src');
+  });
+}
+try {
+  preferences.speechRate = localStorage.getItem('luma-speech-rate') || preferences.speechRate;
+  preferences.rescue = localStorage.getItem('luma-rescue') || preferences.rescue;
+} catch { /* Practice remains usable when the browser denies storage. */ }
+
+const COFFEE_MISSION_PROGRESS_KEY = 'luma-coffee-quest-v1';
+const COFFEE_MISSION_UI = Object.freeze({
+  C01: { title: '第一次自己点咖啡', brief: '这一关会给你足够帮助。说一个词也能继续，最后再试着连起来。', mode: 'guided' },
+  C02: { title: '替朋友点对那一杯', brief: '朋友要一杯小杯拿铁，带走。缺什么，Mia 才会继续问什么。', mode: 'guided' },
+  C03: { title: '发现错单，马上修正', brief: '你点了小杯，拿到的却是大杯。说清哪里不对，让 Mia 换回来。', mode: 'repair' },
+  C04: { title: '独立挑战', brief: '这次默认不显示字幕，也不给完整答案。听不清仍可以主动请求重复。', mode: 'challenge' },
+});
+
+function loadCoffeeMissionProgress() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(COFFEE_MISSION_PROGRESS_KEY) || '{}');
+    return {
+      completed: [...new Set((Array.isArray(parsed.completed) ? parsed.completed : []).filter(id => COFFEE_MISSION_UI[id]))],
+      selected: COFFEE_MISSION_UI[parsed.selected] ? parsed.selected : 'C01',
+      runs: Number.isFinite(parsed.runs) ? Math.max(0, parsed.runs) : 0,
+    };
+  } catch { return { completed: [], selected: 'C01', runs: 0 }; }
+}
+
+const coffeeMissionProgress = loadCoffeeMissionProgress();
 
 const SCENES = {
   kitchen: {
     image: './assets/breakfast/table.webp',
+    previewImage: './assets/optimized/breakfast-preview-860.jpg',
     badge: '可进入',
     eyebrow: 'HOME · MORNING',
     title: '帮 Luma 准备早餐',
-    description: '和 Luma 一起准备早餐：选喜欢的饮料，递一个杯子，再告诉她要多少。一个词也能改变接下来发生的事。',
+    description: '和 Luma 一起准备早餐：说出饮料选择，回应她的请求，再告诉她要多少。你的话会直接改变接下来发生的事。',
     people: [['user', 'Luma'], ['clock', '3–5 分钟'], ['sparkle', '3 个生活片段']],
     goal: 'milk or water · here · more · enough',
     available: true,
   },
   airport: {
     image: './assets/scenes/airport-gate.png',
+    previewImage: './assets/optimized/airport-preview-860.jpg',
     badge: '可进入',
     eyebrow: 'AIRPORT · DEPARTURE',
     title: '找到正确的登机口',
-    description: '把登机牌给工作人员看，再从画面里找到 A12 登机口。每一步都可以先说或先做。',
+    description: '用一句简单回应给工作人员看登机牌，再说出自己的行李和 A12 登机口。每一步都由开口推进。',
     people: [['users-three', '2 位角色'], ['clock', '4 分钟'], ['airplane-tilt', '3 个任务']],
     goal: 'ticket · bag · gate A12',
     available: true,
   },
+  coffee: {
+    image: './assets/coffee/order.webp', previewImage: './assets/optimized/coffee-home-720.jpg', badge: '4 个任务', eyebrow: 'CAFÉ · FIRST QUEST',
+    title: '从一杯咖啡开始',
+    description: '先在帮助下点好一杯，再替朋友转述、修正错单，最后不看字幕独立完成。你说出的每个信息都会留在订单和画面里。',
+    people: [['coffee', '店员 Mia'], ['clock', '每关 3–5 分钟'], ['flag', '4 个递进任务']],
+    goal: '点单 · 转述 · 修正 · 独立挑战', available: true,
+  },
   street: {
     image: './assets/scenes/street-market.png',
+    previewImage: './assets/optimized/street-thumb-220.jpg',
     badge: '环境预览',
     eyebrow: 'CITY · STREET MARKET',
     title: '帮朋友买到想要的东西',
@@ -109,12 +165,13 @@ const SCENES = {
   },
   office: {
     image: './assets/scenes/office-reception.png',
+    previewImage: './assets/optimized/office-preview-860.jpg',
     badge: '可进入',
     eyebrow: 'WORK · RECEPTION',
     title: '第一次拜访新同事',
-    description: '先向前台说明来意，完成签到和等候，再自然地和新同事打招呼。说话能推进情境，签到也可以直接操作。',
+    description: '先向前台说明来意和姓名，听懂等候安排，再自然地和新同事打招呼。每一步都由对话推进。',
     people: [['users-three', '2 位角色'], ['clock', '4 分钟'], ['sparkle', '4 个片段']],
-    goal: 'I’m here to see · sign in · please wait · nice to meet you',
+    goal: 'I’m here to see · my name is · please wait · nice to meet you',
     available: true,
   },
 };
@@ -122,19 +179,23 @@ const SCENES = {
 const KITCHEN_TASKS = Breakfast.tasks;
 
 const AIRPORT_TASKS = [
-  { id: 'ticket', interaction: 'tap', requiresAction: true, prompt: 'Your ticket, please.', actionPrompt: 'Good. Show me the ticket.', hint: '点一下手里的登机牌。' },
+  { id: 'ticket', interaction: 'speech', requiresAction: false, prompt: 'May I see your ticket?', hint: '直接说 Here you are；不用点击登机牌。' },
   { id: 'bag', interaction: 'speech', requiresAction: false, prompt: 'Is this your bag?', hint: '直接回答 Luma，不需要点击行李箱。' },
-  { id: 'gate-a12', interaction: 'tap', requiresAction: true, prompt: 'Find A12.', actionPrompt: 'Point to the A12 sign, please.', hint: '点一下画面中的 A12，表示你已经指出了登机口。' },
+  { id: 'gate-a12', interaction: 'speech', requiresAction: false, prompt: 'Which gate are you going to?', hint: '说 A12 就可以；不用在画面里找按钮。' },
 ];
 
 const OFFICE_TASKS = [
   { id: 'office-purpose', interaction: 'speech', requiresAction: false, speaker: '前台', prompt: 'Who are you here to see?', hint: '告诉前台你来见谁；不需要照着固定句子说。' },
-  { id: 'office-signin', interaction: 'tap', requiresAction: true, speaker: '前台', prompt: 'Please sign in here.', actionPrompt: 'Good. Touch the sign-in screen.', hint: '点一下接待台上的签到平板。' },
+  { id: 'office-signin', interaction: 'speech', requiresAction: false, speaker: '前台', prompt: 'What is your name, please?', hint: '告诉前台你的名字，例如 My name is Li。' },
   { id: 'office-wait', interaction: 'none', requiresAction: false, requiresSpeech: false, autoAdvance: true, speaker: '前台', prompt: 'Please wait here. Maya is coming.', hint: '这一句只需要听懂，情境会自己继续。' },
   { id: 'office-greeting', interaction: 'speech', requiresAction: false, speaker: 'Maya', prompt: "Hi, I'm Maya. Nice to meet you.", hint: '自然回应 Maya 的问候即可，不设唯一答案。' },
 ];
 
 const SCENE_CONFIGS = {
+  coffee: {
+    source: { width: 1024, height: 1792 }, image: SCENES.coffee.image, tasks: Coffee.tasks,
+    mouth: { x: 520, y: 460, width: 18, height: 8 }, anchors: {},
+  },
   kitchen: {
     source: { width: 941, height: 1672 }, image: SCENES.kitchen.image, tasks: KITCHEN_TASKS,
     mouth: { x: 635, y: 354, width: 22, height: 9 },
@@ -165,7 +226,9 @@ const SCENE_CONFIGS = {
 };
 
 const FINAL_REVIEW_DWELL_MS = 4200;
-const TASK_ADVANCE_DWELL_MS = 2600;
+// Let the learner absorb a complete acknowledgment before the next prompt.
+// This quiet period starts only after the current voice turn has settled.
+const TASK_ADVANCE_DWELL_MS = 1600;
 const LEARNING_PROFILE_KEY = 'luma-learning-profile-v1';
 const TURN_PHASE = Object.freeze({
   PRESENTING: 'presenting',
@@ -200,6 +263,10 @@ const state = {
   stage: 'idle',
   taskIndex: 0,
   breakfast: Breakfast.initial(),
+  coffee: Coffee.initial(),
+  coffeeMissionId: 'C01',
+  coffeeVariantId: null,
+  coffeeMissionAttempt: 0,
   breakfastHelp: false,
   breakfastCupSelected: false,
   hintLevel: 0,
@@ -209,6 +276,7 @@ const state = {
   handsFreeListening: false,
   micMuted: false,
   micStarting: false,
+  micFailure: null,
   mediaStream: null,
   audioContext: null,
   audioSource: null,
@@ -223,6 +291,7 @@ const state = {
   connectionGeneration: 0,
   firstPacketTimer: null,
   bufferOverflow: false,
+  deferredVoiceEvents: [],
   audioWorkletLoaded: false,
   captionAudioStart: 0,
   lastCharacterEndedAt: 0,
@@ -230,6 +299,8 @@ const state = {
   captureSampleRate: 16000,
   duplexSocket: null,
   duplexReady: false,
+  duplexFailureCount: 0,
+  voiceConnectionPaused: false,
   duplexConnectPromise: null,
   duplexConnectResolve: null,
   duplexConnectReject: null,
@@ -249,6 +320,8 @@ const state = {
   duplexFinishTimer: null,
   characterWatchdogTimer: null,
   lastDuplexAudioAt: 0,
+  duplexClockTime: 0,
+  duplexClockAdvancedAt: 0,
   captionRevealTimer: null,
   captionCharacters: [],
   captionVisibleCount: 0,
@@ -276,6 +349,7 @@ const state = {
   lastBargeInEnergyAt: 0,
   lastServerSpeechAt: 0,
   pendingServerTurnContext: null,
+  pendingTransitionUtterance: null,
   micNoiseFloor: .002,
   micCalibrationUntil: 0,
   lastMicFrameAt: 0,
@@ -320,8 +394,200 @@ const state = {
   hand: { x: 0, y: 0 },
   scale: 1,
   toastTimer: null,
-  completed: Boolean(localStorage.getItem('luma-demo-v6-complete')),
+  completed: false,
 };
+state.coffeeMissionId = coffeeMissionProgress.selected;
+
+function coffeeMissionMeta(id = state.coffeeMissionId) {
+  const engineMission = typeof Coffee.getMission === 'function' ? Coffee.getMission(id) : null;
+  return { id, ...(COFFEE_MISSION_UI[id] || COFFEE_MISSION_UI.C01), ...(engineMission || {}) };
+}
+
+function coffeeMissionIsUnlocked(id) {
+  const ids = Object.keys(COFFEE_MISSION_UI);
+  const index = ids.indexOf(id);
+  return index <= 0 || ids.slice(0, index).every(previous => coffeeMissionProgress.completed.includes(previous));
+}
+
+function saveCoffeeMissionProgress() {
+  coffeeMissionProgress.selected = state.coffeeMissionId;
+  try { localStorage.setItem(COFFEE_MISSION_PROGRESS_KEY, JSON.stringify(coffeeMissionProgress)); } catch {}
+}
+
+function syncOuterQuestUi() {
+  const ids = Object.keys(COFFEE_MISSION_UI);
+  const completed = new Set(coffeeMissionProgress.completed);
+  const checkpoint = globalThis.LumaExperience?.store?.getCheckpoint?.({ sceneId: 'coffee' });
+  const activeMissionId = checkpoint?.sceneId === 'coffee' && COFFEE_MISSION_UI[checkpoint.missionId]
+    ? checkpoint.missionId : null;
+  const nextId = activeMissionId || ids.find(id => !completed.has(id)) || 'C04';
+  const nextIndex = ids.indexOf(nextId);
+
+  document.querySelectorAll('[data-adventure-mission]').forEach((node) => {
+    const id = node.dataset.adventureMission;
+    const isComplete = completed.has(id) && id !== activeMissionId;
+    const isCurrent = id === nextId;
+    node.classList.toggle('is-complete', isComplete);
+    node.classList.toggle('is-current', isCurrent);
+    node.classList.toggle('is-upcoming', !isComplete && !isCurrent);
+    const status = node.querySelector('em');
+    if (status) status.textContent = isComplete ? '已完成' : isCurrent ? '现在' : '接下来';
+  });
+  const adventureRoute = document.querySelector('#adventureRoute');
+  if (adventureRoute) adventureRoute.dataset.nextIndex = String(nextIndex);
+
+  const worldMapTitle = document.querySelector('#worldMapTitle');
+  if (worldMapTitle) worldMapTitle.textContent = '街角咖啡店';
+  const worldMapStateLabel = document.querySelector('#worldMapStateLabel');
+  if (worldMapStateLabel) worldMapStateLabel.textContent = completed.size === ids.length ? '旅程完成' : '当前旅程';
+  const worldMapHeaderProgress = document.querySelector('#worldMapHeaderProgress');
+  if (worldMapHeaderProgress) worldMapHeaderProgress.textContent = `${completed.size}/${ids.length}`;
+  const progressPercent = Math.round((completed.size / ids.length) * 100);
+  const nextMission = COFFEE_MISSION_UI[nextId] || COFFEE_MISSION_UI.C04;
+  const worldJourneyCard = document.querySelector('#worldJourneyCard');
+  const worldJourneyProgress = document.querySelector('#worldJourneyProgress');
+  const worldJourneyMissionCode = document.querySelector('#worldJourneyMissionCode');
+  const worldJourneyMissionStatus = document.querySelector('#worldJourneyMissionStatus');
+  const worldJourneyMissionTitle = document.querySelector('#worldJourneyMissionTitle');
+  const worldJourneyProgressBar = document.querySelector('#worldJourneyProgressBar');
+  const nextMissionStatus = completed.size === ids.length
+    ? '旅程完成 · 可以重访'
+    : activeMissionId === nextId ? '上次练到这里 · 从头再练' : nextId === 'C04' ? '独立挑战 · 可以开始' : '当前事件 · 可以开始';
+  if (worldJourneyCard) {
+    worldJourneyCard.dataset.worldMission = nextId;
+    worldJourneyCard.setAttribute('aria-label', `查看当前旅程：${nextId} ${nextMission.title}，已完成 ${completed.size} / ${ids.length}`);
+  }
+  if (worldJourneyProgress) worldJourneyProgress.textContent = `${completed.size}/${ids.length}`;
+  if (worldJourneyMissionCode) worldJourneyMissionCode.textContent = nextId;
+  if (worldJourneyMissionStatus) worldJourneyMissionStatus.textContent = nextMissionStatus;
+  if (worldJourneyMissionTitle) worldJourneyMissionTitle.textContent = nextMission.title;
+  if (worldJourneyProgressBar) worldJourneyProgressBar.style.setProperty('--world-progress', `${progressPercent}%`);
+  const coffeeMapNode = document.querySelector('[data-world-node="coffee"]');
+  if (coffeeMapNode) {
+    coffeeMapNode.classList.toggle('is-complete', completed.size === ids.length);
+    coffeeMapNode.setAttribute('aria-label', `查看街角的第一杯，已完成 ${completed.size} / ${ids.length}`);
+  }
+}
+
+function selectCoffeeMission(id, { persist = true } = {}) {
+  if (!COFFEE_MISSION_UI[id] || !coffeeMissionIsUnlocked(id)) return false;
+  state.coffeeMissionId = id;
+  const variants = coffeeMissionMeta(id).variants || [];
+  state.coffeeVariantId = id === 'C04' && variants.length ? variants[coffeeMissionProgress.runs % variants.length].id : null;
+  if (persist) saveCoffeeMissionProgress();
+  syncCoffeeMissionBoard();
+  return true;
+}
+
+function syncCoffeeMissionBoard() {
+  syncOuterQuestUi();
+  if (!coffeeMissionBoard) return;
+  const isCoffee = state.selectedScene === 'coffee';
+  coffeeMissionBoard.hidden = !isCoffee;
+  scene.classList.toggle('is-coffee-intro', isCoffee && !document.querySelector('#sceneIntro')?.hidden);
+  if (!isCoffee) return;
+  if (!coffeeMissionIsUnlocked(state.coffeeMissionId)) state.coffeeMissionId = 'C01';
+  for (const button of coffeeMissionButtons) {
+    const id = button.dataset.coffeeMission;
+    const unlocked = coffeeMissionIsUnlocked(id);
+    const complete = coffeeMissionProgress.completed.includes(id);
+    const selected = state.coffeeMissionId === id;
+    button.disabled = !unlocked;
+    button.setAttribute('aria-disabled', String(!unlocked));
+    button.setAttribute('aria-pressed', String(selected));
+    button.querySelector('.mission-state').textContent = selected ? '本次' : complete ? '可重练' : unlocked ? '可开始' : '待解锁';
+  }
+  coffeeMissionProgressLabel.textContent = `${coffeeMissionProgress.completed.length} / 4`;
+  const mission = coffeeMissionMeta();
+  const variant = (mission.variants || []).find(item => item.id === state.coffeeVariantId) || (mission.variants || [])[0];
+  const targetText = variant?.target ? ['size', 'drink', 'service'].map(slot => coffeeSlotLabel(slot, variant.target[slot])).join(' · ') : '';
+  coffeeMissionBrief.textContent = state.coffeeMissionId === 'C04' && targetText
+    ? `本次目标：${targetText}。默认不显示字幕，听不清仍可以主动请求重复。`
+    : mission.brief;
+  const readyLabel = document.querySelector('#introReady span');
+  if (readyLabel) readyLabel.textContent = state.coffeeMissionId === 'C04' ? '开始独立挑战' : `开始任务 ${state.coffeeMissionId}`;
+}
+
+function coffeeOrderState(world = state.coffee) {
+  return world?.order && typeof world.order === 'object' ? world.order : world || {};
+}
+
+function coffeeDeliveredState(world = state.coffee) {
+  return world?.delivered && typeof world.delivered === 'object' ? world.delivered : coffeeOrderState(world);
+}
+
+function coffeeTargetState(world = state.coffee) {
+  return world?.target && typeof world.target === 'object' ? world.target : null;
+}
+
+function coffeeSlotLabel(slot, value) {
+  const labels = {
+    drink: { latte: '拿铁', americano: '美式' },
+    size: { small: '小杯', large: '大杯' },
+    service: { here: '堂食', 'to-go': '带走' },
+  };
+  const empty = { drink: '饮品', size: '杯型', service: '方式' };
+  return labels[slot]?.[value] || empty[slot];
+}
+
+function syncCoffeeMissionHud() {
+  const isCoffee = state.selectedScene === 'coffee' && state.sceneStarted;
+  missionHud.hidden = !isCoffee;
+  orderSlots.hidden = !isCoffee;
+  if (!isCoffee) return;
+  const mission = coffeeMissionMeta();
+  const tasks = currentSceneConfig().tasks;
+  missionHudCode.textContent = `任务 ${state.coffeeMissionId}`;
+  const target = coffeeTargetState();
+  const targetText = target ? ['size', 'drink', 'service'].map(slot => coffeeSlotLabel(slot, target[slot])).join(' · ') : '';
+  missionHudTitle.textContent = targetText && ['C02', 'C04'].includes(state.coffeeMissionId) ? `${mission.title} · ${targetText}` : mission.title;
+  missionHudProgress.textContent = `${Math.min(state.taskIndex + 1, tasks.length)} / ${tasks.length}`;
+  const order = coffeeOrderState();
+  const delivered = coffeeDeliveredState();
+  for (const element of orderSlots.querySelectorAll('[data-order-slot]')) {
+    const slot = element.dataset.orderSlot;
+    const value = state.coffeeMissionId === 'C03' ? delivered[slot] : order[slot];
+    element.textContent = coffeeSlotLabel(slot, value);
+    element.classList.toggle('is-filled', Boolean(value));
+    element.classList.toggle('is-wrong', Boolean(target?.[slot] && value && target[slot] !== value));
+  }
+}
+
+function markCoffeeMissionCompleted() {
+  if (state.selectedScene !== 'coffee' || !COFFEE_MISSION_UI[state.coffeeMissionId]) return;
+  if (!coffeeMissionProgress.completed.includes(state.coffeeMissionId)) coffeeMissionProgress.completed.push(state.coffeeMissionId);
+  coffeeMissionProgress.runs += 1;
+  saveCoffeeMissionProgress();
+  syncCoffeeMissionBoard();
+}
+
+function renderCoffeeMissionResult() {
+  const active = state.selectedScene === 'coffee';
+  missionResult.hidden = !active;
+  if (!active) return;
+  const mission = coffeeMissionMeta();
+  const goals = Object.values(state.sessionGoals).filter(goal => goal.id !== 'coffee-thanks' && goal.meaningAccepted);
+  const independentVoice = goals.length > 0 && goals.every(goal => goal.spoke && goal.language === 'en' && (goal.supportLevel || 0) === 0);
+  document.querySelector('#missionResultCode').textContent = `咖啡店任务 ${state.coffeeMissionId}`;
+  document.querySelector('#missionResultTitle').textContent = state.coffeeMissionId === 'C03' ? '错单已经修正' : '这杯咖啡，点成了';
+  document.querySelector('#missionResultCopy').textContent = independentVoice
+    ? '关键意思由你用英语语音说清了。下一关会少给一点帮助，看看能不能继续做到。'
+    : '你完成了这次真实任务；中文或提示都会如实保留，下次可以少借助一点再试。';
+  missionResultTags.replaceChildren();
+  const order = coffeeOrderState();
+  const values = ['size', 'drink', 'service'].map(slot => coffeeSlotLabel(slot, order[slot])).filter(label => !['杯型', '饮品', '方式'].includes(label));
+  for (const label of values) {
+    const tag = document.createElement('span'); tag.textContent = label; missionResultTags.append(tag);
+  }
+  const evidence = document.createElement('span');
+  evidence.className = independentVoice ? 'is-earned' : '';
+  evidence.textContent = independentVoice ? '本次独立英语语音' : '本次完成 · 独立口语待练';
+  missionResultTags.append(evidence);
+  const ids = Object.keys(COFFEE_MISSION_UI), next = ids[ids.indexOf(state.coffeeMissionId) + 1];
+  repeatSceneButton.innerHTML = next
+    ? `<i class="ph ph-arrow-right"></i> 继续任务 ${next}`
+    : '<i class="ph ph-arrow-counter-clockwise"></i> 再挑战一个新订单';
+}
 
 const voiceInstanceId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 const voiceSessionChannel = 'BroadcastChannel' in window ? new window.BroadcastChannel('luma-exclusive-voice-v1') : null;
@@ -342,9 +608,48 @@ voiceSessionChannel?.addEventListener('message', (event) => {
   if (state.sceneStarted) showAppToast('另一个页面已开始语音，本页已自动静音', 3200);
 });
 
+function coffeeMissionTasks() {
+  const mission = coffeeMissionMeta();
+  const ids = Array.isArray(mission.taskIds) && mission.taskIds.length ? mission.taskIds : Coffee.tasks.map(task => task.id);
+  return ids.map(id => {
+    const base = Coffee.tasks.find(task => task.id === id);
+    if (!base) return null;
+    if (state.coffeeMissionId === 'C03' && id === 'coffee-size') return {
+      ...base, label: '指出拿到的杯型不对', hint: '可以说 Sorry, I ordered a small. 或 This should be small.',
+    };
+    if (['C02', 'C04'].includes(state.coffeeMissionId) && id === 'coffee-order') return {
+      ...base, label: state.coffeeMissionId === 'C02' ? '按朋友的便条点单' : '独立说清这次订单',
+      hint: state.coffeeMissionId === 'C02' ? '朋友要：小杯拿铁，带走。可以一次说完，也可以逐项回答。' : '先自己听和说；需要时可以主动请求重复。',
+    };
+    return base;
+  }).filter(Boolean);
+}
+
+function resolvedCoffeeTaskIds(world = state.coffee) {
+  const resolved = new Set();
+  const mission = Coffee.getMission?.(world?.missionId);
+  if (!world || !mission) return resolved;
+  if (mission.kind === 'delivery-repair') {
+    if (!world.repair?.required) resolved.add('coffee-size');
+  } else {
+    if (world.drink && (!world.target || world.drink === world.target.drink)) resolved.add('coffee-order');
+    if (world.size && (!world.target || world.size === world.target.size)) resolved.add('coffee-size');
+    if (world.service && (!world.target || world.service === world.target.service)) resolved.add('coffee-service');
+  }
+  if (world.received) resolved.add('coffee-thanks');
+  return resolved;
+}
+
 function currentTask() {
   const tasks = currentSceneConfig().tasks;
   const task = tasks[state.taskIndex] ?? tasks[0];
+  if (state.selectedScene === 'coffee' && Coffee.isTask(task.id)) {
+    const nextStep = Coffee.nextMissionStep?.(state.coffee);
+    const prompt = nextStep?.taskId === task.id
+      ? Coffee.nextPrompt?.(state.coffee)
+      : Coffee.promptFor(task.id, state.coffee);
+    return { ...task, prompt: prompt || task.prompt };
+  }
   return task.id === 'breakfast-more' ? { ...task, prompt: Breakfast.promptFor(task.id, state.breakfast) } : task;
 }
 
@@ -380,8 +685,14 @@ function isActionAcknowledgement(task, text, question = state.activeQuestion || 
 
 function captureUserTurnContext() {
   return {
+    source: 'voice',
+    evidenceSessionId: globalThis.LumaExperience?.currentSession?.(),
+    supportLevel: globalThis.LumaExperience?.supportLevel?.() ?? null,
     practiceSession: state.practiceSession,
     sceneId: state.selectedScene,
+    missionId: state.selectedScene === 'coffee' ? state.coffeeMissionId : null,
+    variantId: state.selectedScene === 'coffee' ? (state.coffeeVariantId || state.coffee?.variantId || null) : null,
+    contentVersion: state.selectedScene === 'coffee' ? (state.coffee?.contentVersion || coffeeMissionMeta().contentVersion || null) : null,
     taskId: currentTask().id,
     taskIndex: state.taskIndex,
     characterTurnId: state.characterTurnId,
@@ -399,13 +710,38 @@ function setVoicePhase(phase) {
 }
 
 function syncVoiceStatus() {
-  const text = state.micMuted ? '麦克风已关闭 · 也可以打字'
+  const text = !state.sceneStarted ? ''
+    : state.micFailure === 'permission' ? '麦克风权限被拒绝 · 在浏览器设置中允许后，点麦克风重试'
+    : state.micFailure === 'unavailable' ? '麦克风暂时不可用 · 检查设备后点麦克风重试'
+    : state.voiceConnectionPaused ? '语音连接已暂停 · 网络恢复后点麦克风重试'
+    : state.micMuted ? '麦克风已关闭 · 点麦克风继续'
     : !state.handsFreeListening ? '正在准备麦克风…'
-    : !state.duplexReady ? (state.bufferOverflow ? '连接较慢 · 请稍候或打字' : '正在连接 · 已暂存你的声音')
+    : !state.duplexReady ? (state.bufferOverflow ? '连接较慢 · 恢复后请再说一次' : '正在连接 · 已暂存你的声音')
+    : microphoneWaitsForCharacter() ? `${currentTask().speaker || 'Luma'} 正在说 · 你也可以开口`
     : state.voicePhase === 'recording' ? '正在听你说'
     : '麦克风已开 · 随时说话';
   if (voiceStatus.textContent !== text) voiceStatus.textContent = text;
-  scene.dataset.connectionState = state.duplexReady ? 'ready' : 'connecting';
+  scene.dataset.connectionState = !state.sceneStarted ? 'inactive'
+    : state.micFailure || state.voiceConnectionPaused ? 'error'
+    : state.duplexReady ? 'ready' : 'connecting';
+  const micIcon = micButton.querySelector?.('i');
+  if (state.voiceConnectionPaused) {
+    micButton.classList.remove('is-live', 'is-muted', 'is-held');
+    micButton.classList.add('is-retry');
+    micButton.setAttribute('aria-pressed', 'false');
+    micButton.setAttribute('aria-label', '重试语音连接');
+    micLabel.textContent = '重试连接';
+    if (micIcon) micIcon.className = 'ph ph-arrow-clockwise';
+  } else {
+    micButton.classList.remove('is-retry');
+    if (micIcon) micIcon.className = 'ph ph-microphone';
+    if (!state.micFailure && state.handsFreeListening && !state.micMuted) {
+      micButton.classList.add('is-live');
+      micButton.setAttribute('aria-pressed', 'true');
+      micButton.setAttribute('aria-label', '关闭麦克风');
+      micLabel.textContent = state.voicePhase === 'recording' ? '正在听' : '随时说';
+    }
+  }
 }
 
 function sceneVoiceIsOpen() {
@@ -453,7 +789,7 @@ function startVoiceHealthMonitor() {
     } else if (state.audioContext?.state === 'suspended') {
       state.audioContext.resume().catch(() => {});
     }
-    if (!state.duplexReady && !state.duplexConnectPromise) connectDuplexSession().catch(() => {});
+    if (!state.voiceConnectionPaused && !state.duplexReady && !state.duplexConnectPromise) connectDuplexSession().catch(() => {});
   }, 1200);
 }
 
@@ -514,6 +850,9 @@ function beginExpectedResponse(kind, { questionId = '', turnId = 0 } = {}) {
     responseId: '',
     turnId,
     audioStarted: false,
+    practiceSession: state.practiceSession,
+    sceneId: state.selectedScene,
+    taskId: currentTask().id,
   };
   return state.expectedResponse;
 }
@@ -537,6 +876,8 @@ function acceptResponseEvent(event) {
     rememberBounded(state.ignoredQuestionIds, questionId);
     return false;
   }
+  if (expected.practiceSession !== state.practiceSession || expected.sceneId !== state.selectedScene
+    || expected.taskId !== currentTask().id) return false;
   if (expected.responseId && responseId && expected.responseId !== responseId) {
     rememberBounded(state.ignoredResponseIds, responseId);
     rememberBounded(state.ignoredQuestionIds, questionId);
@@ -552,6 +893,27 @@ function acceptResponseEvent(event) {
   return true;
 }
 
+function resolveLearnerBeforeReply() {
+  const expected = state.expectedResponse;
+  if (state.selectedScene !== 'coffee' || expected?.kind !== 'user') return true;
+  const turn = [...transcriptLedger.items.values()].find(item => item.id === expected.turnId);
+  // A provider reply is an endpoint signal. Resolve the latest hypothesis
+  // before releasing that reply, rather than waiting six seconds for a final
+  // packet which may never arrive. An ordinary mid-sentence pause is not one.
+  if (turn?.confirmed && !turn.final && VoiceRuntime.isSpeechText(turn.text)) {
+    turn.responseStarted = true;
+    finalizeLearnerTranscript(turn.text, { turn });
+  }
+  return state.expectedResponse === expected;
+}
+
+function learnerDecisionPending() {
+  const expected = state.expectedResponse;
+  if (state.selectedScene !== 'coffee' || expected?.kind !== 'user') return false;
+  const turn = [...transcriptLedger.items.values()].find(item => item.id === expected.turnId);
+  return Boolean(turn && (!turn.final || turn.decisionPending));
+}
+
 function acceptTranscriptEvent(event, { allowStart = false } = {}) {
   const itemId = transcriptItemId(event);
   let turn = itemId ? transcriptLedger.items.get(itemId) : state.activeVoiceTurn;
@@ -565,7 +927,9 @@ function acceptTranscriptEvent(event, { allowStart = false } = {}) {
 }
 
 function clearLocalSpeechTurn({ keepContext = false } = {}) {
-  clearTimeout(state.voiceTurnWatchdogTimer);
+  // Releasing the microphone floor must not lose a partial transcript when
+  // the provider starts its reply before sending the final recognition event.
+  if (!state.activeVoiceTurn?.confirmed) clearTimeout(state.voiceTurnWatchdogTimer);
   clearTimeout(state.courtesyTimer);
   state.voiceTurnWatchdogTimer = null;
   state.courtesyTimer = null;
@@ -593,13 +957,14 @@ function updateLearnerTurn(turn, text, final = false) {
   message.text = turn.text;
   message.revision = turn.revision;
   message.final = final;
-  message.status = final ? '' : '正在识别';
+  message.status = final ? '已听到' : '正在识别';
   renderDialogue();
   if (state.activeVoiceTurn === turn) state.streamingUserIndex = state.dialogueHistory.indexOf(message);
 }
 
 function confirmLearnerTurn(turn, text) {
   if (turn.confirmed || !VoiceRuntime.isSpeechText(text)) return;
+  if (microphoneWaitsForCharacter()) return;
   const playback = isConversationPlaybackActive();
   // Volume / VAD alone cannot distinguish a keyboard or door from a learner.
   if (playback && VoiceRuntime.isPlaybackEcho(text, state.currentSpeech)) return;
@@ -620,25 +985,41 @@ function confirmLearnerTurn(turn, text) {
   setVoicePhase('recording');
 }
 
-function armVoiceTurnWatchdog() {
-  clearTimeout(state.voiceTurnWatchdogTimer);
-  const turn = state.activeVoiceTurn;
-  if (!turn) return;
-  state.voiceTurnWatchdogTimer = setTimeout(() => {
-    if (state.activeVoiceTurn !== turn) return;
-    const message = state.dialogueHistory.find(item => item.id === turn.messageId);
-    if (message) { message.status = '识别未完成'; renderDialogue(); }
-    clearLocalSpeechTurn();
-    if (turn.confirmed && !turn.responseStarted) {
-      state.awaitingModelReply = true;
-      armReplyTimeout();
-    } else { openLearnerTurn(); scheduleIdleNudge(); }
-  }, 10000);
+function armVoiceTurnWatchdog(turn = state.activeVoiceTurn) {
+  if (!turn || turn.final) return;
+  clearTimeout(turn.finalizeTimer);
+  const generation = state.connectionGeneration;
+  turn.finalizeTimer = setTimeout(() => {
+    turn.finalizeTimer = null;
+    if (turn.final || !state.sceneStarted || turn.context.practiceSession !== state.practiceSession
+      || generation !== state.connectionGeneration) return;
+    // A usable hypothesis still belongs to this item after audio.started.
+    // Evaluate it once after recognition goes quiet; a missing final packet
+    // should never force the learner to repeat an already clear answer.
+    if (turn.confirmed && VoiceRuntime.isSpeechText(turn.text)) {
+      finalizeLearnerTranscript(turn.text, { turn });
+    } else if (state.activeVoiceTurn === turn) {
+      if (microphoneWaitsForCharacter()) { armVoiceTurnWatchdog(turn); return; }
+      finalizeLearnerTranscript('', { turn });
+      settleFailedDuplexTurn();
+    }
+  }, 6000);
+  state.voiceTurnWatchdogTimer = turn.finalizeTimer;
 }
 
 function finalizeLearnerTranscript(transcript, { turn = state.activeVoiceTurn } = {}) {
   if (!turn || turn.final || turn.context.practiceSession !== state.practiceSession) return;
+  clearTimeout(turn.finalizeTimer); turn.finalizeTimer = null;
   const clean = String(transcript || '').trim();
+  if (turn.context.sceneId !== state.selectedScene || turn.context.taskId !== currentTask().id
+    || turn.context.taskIndex !== state.taskIndex) {
+    // A late final may finish its old bubble, but cannot take the floor or
+    // create a new response for the step the learner has already left.
+    if (turn.confirmed && VoiceRuntime.isSpeechText(clean)) updateLearnerTurn(turn, clean, true);
+    else turn.final = true;
+    if (state.activeVoiceTurn === turn) clearLocalSpeechTurn();
+    return;
+  }
   if (VoiceRuntime.isSpeechText(clean)) {
     confirmLearnerTurn(turn, clean);
     if (turn.confirmed) updateLearnerTurn(turn, clean, true);
@@ -654,17 +1035,100 @@ function finalizeLearnerTranscript(transcript, { turn = state.activeVoiceTurn } 
     cleanupSpeechCaptureUi();
     setVoicePhase('listening');
   }
-  if (!turn.confirmed) { openLearnerTurn(); scheduleIdleNudge(); return; }
+  if (!turn.confirmed) {
+    globalThis.LumaExperience?.noteAnswer({ ...turn.context, messageId: turn.messageId || turn.id, answer: '' }, 'technical-error');
+    openLearnerTurn(); scheduleIdleNudge(); return;
+  }
+  turn.superseded ||= [...transcriptLedger.items.values()].some(item => item.confirmed && item.id > turn.id)
+    || state.dialogueHistory.some(item => item.speaker === 'user' && item.final && item.id > turn.messageId);
+  const message = state.dialogueHistory.find(item => item.id === turn.messageId);
+  if (turn.superseded && DialogueRules.supportIntent(clean)) return;
+  if (!turn.superseded && message && stageTransitionUtterance(clean, turn, message)) return;
+  if (!turn.superseded && message && acknowledgeCompletedTurn(clean, message)) return;
   if (!turn.superseded && !turn.responseStarted && (!state.expectedResponse || state.expectedResponse.turnId === turn.id)) {
     if (!state.expectedResponse) beginExpectedResponse('user', { questionId: turn.itemId, turnId: turn.id });
     state.awaitingModelReply = true;
     armReplyTimeout();
   }
-  const message = state.dialogueHistory.find(item => item.id === turn.messageId);
-  if (clean && message) requestLanguageFeedback(turn.context.question, clean, {
-    ...turn.context, messageId: message.id, revision: message.revision, final: true,
-  });
+  if (!turn.superseded && message && handleConversationSupport(clean, turn.context, message, { responseStarted: turn.responseStarted })) return;
+  if (clean && message) {
+    turn.decisionPending = true;
+    Promise.resolve(requestLanguageFeedback(turn.context.question, clean, {
+      ...turn.context, messageId: message.id, revision: message.revision, final: true,
+    })).finally(() => {
+      turn.decisionPending = false;
+      if (state.expectedResponse?.turnId === turn.id) publishDuplexSubtitle();
+    });
+  }
   publishDuplexSubtitle();
+}
+
+function acknowledgeCompletedTurn(text, message) {
+  if (state.selectedScene !== 'coffee' || !['task-complete', 'complete'].includes(state.stage)) return false;
+  const clean = String(text).toLowerCase().replace(/[.,!，。！]/g, '').trim();
+  const courtesy = /^(yes|yeah|yep|yup|ok|okay|right|sure|correct|that's right|thank you|thanks|对|对的|是的|好|好的|嗯|嗯嗯|没错|谢谢)(\s+(please|thanks|thank you|yes|yeah))?$/.test(clean);
+  const repeat = Coffee.advanceMission(state.coffee, text);
+  const repeatsChoice = repeat.reason === 'already-confirmed';
+  if (!courtesy && !repeatsChoice) return false;
+  stopSpeechPlayback();
+  message.status = '已听到 · 继续下一步';
+  renderDialogue();
+  openLearnerTurn();
+  // A brief “yes” is the learner's latest turn. Give it its own quiet beat
+  // instead of using a timer that began before they finished speaking.
+  if (state.stage === 'task-complete') {
+    const nextTaskIndex = currentSceneConfig().tasks.findIndex((candidate, index) =>
+      index > state.taskIndex && !state.coveredGoals.has(candidate.id));
+    if (nextTaskIndex >= 0) scheduleTaskAdvance(nextTaskIndex);
+  }
+  return true;
+}
+
+function stageTransitionUtterance(text, turn, message) {
+  if (state.stage !== 'task-complete' || state.selectedScene !== 'coffee' || !message || !turn) return false;
+  const tasks = currentSceneConfig().tasks;
+  const nextTaskIndex = tasks.findIndex((candidate, index) => index > state.taskIndex && !state.coveredGoals.has(candidate.id));
+  const nextTask = tasks[nextTaskIndex];
+  const engineStep = Coffee.nextMissionStep?.(state.coffee);
+  if (!nextTask || engineStep?.taskId !== nextTask.id) return false;
+  const preview = Coffee.advanceMission(state.coffee, text, { expectedRevision: state.coffee?.revision });
+  const advancesNextTask = preview.accepted
+    && (preview.changedFields || []).map(coffeeTaskForChangedField).includes(nextTask.id);
+  if (!advancesNextTask) return false;
+  stopSpeechPlayback();
+  state.pendingTransitionUtterance = {
+    practiceSession: state.practiceSession,
+    taskId: nextTask.id,
+    taskIndex: nextTaskIndex,
+    messageId: message.id,
+    text: String(text || '').trim(),
+  };
+  message.status = '已听到 · 下一步出现后确认';
+  renderDialogue();
+  return true;
+}
+
+function consumeTransitionUtterance() {
+  const pending = state.pendingTransitionUtterance;
+  if (!pending || pending.practiceSession !== state.practiceSession || state.stage !== 'active'
+    || pending.taskIndex !== state.taskIndex || pending.taskId !== currentTask().id) return false;
+  state.pendingTransitionUtterance = null;
+  const message = state.dialogueHistory.find(item => item.id === pending.messageId);
+  if (!message || message.text !== pending.text) return false;
+  message.taskId = currentTask().id;
+  message.revision = Math.max(1, Number(message.revision) || 1) + 1;
+  message.status = '已接到下一步 · 正在确认';
+  renderDialogue();
+  const context = {
+    ...captureUserTurnContext(),
+    messageId: message.id,
+    revision: message.revision,
+    answer: message.text,
+    final: true,
+    source: 'voice',
+  };
+  requestLanguageFeedback(context.question, message.text, context);
+  return true;
 }
 
 function beginLocalSpeechTurn({ contextOverride = null } = {}) {
@@ -692,12 +1156,14 @@ function taskProgress() {
   return Math.min(100, (completed / tasks.length) * 100);
 }
 
-function currentSceneConfig() { return SCENE_CONFIGS[state.selectedScene] ?? SCENE_CONFIGS.kitchen; }
+function currentSceneConfig() {
+  const config = SCENE_CONFIGS[state.selectedScene] ?? SCENE_CONFIGS.kitchen;
+  return state.selectedScene === 'coffee' ? { ...config, tasks: coffeeMissionTasks() } : config;
+}
 
-function currentGoalRecord() {
-  const task = currentTask();
-  state.sessionGoals[task.id] ||= {
-    id: task.id,
+function goalRecord(taskId = currentTask().id) {
+  state.sessionGoals[taskId] ||= {
+    id: taskId,
     heard: false,
     acted: false,
     spoke: false,
@@ -706,8 +1172,10 @@ function currentGoalRecord() {
     hints: 0,
     responseLatencyMs: 0,
   };
-  return state.sessionGoals[task.id];
+  return state.sessionGoals[taskId];
 }
+
+function currentGoalRecord() { return goalRecord(); }
 
 function setTurnPhase(phase, label = '', modifier = '') {
   state.turnPhase = phase;
@@ -729,6 +1197,7 @@ function syncSceneProgress() {
   sceneProgress.setAttribute('aria-valuemax', String(tasks.length));
   sceneProgress.setAttribute('aria-valuenow', String(completed));
   sceneProgress.setAttribute('aria-valuetext', missing.length ? `已完成 ${completed}/${tasks.length}，当前还需${missing.join('和')}` : `已完成 ${completed}/${tasks.length}`);
+  syncCoffeeMissionHud();
 }
 
 function markGoalHeard() {
@@ -738,19 +1207,25 @@ function markGoalHeard() {
   if (!state.questionReadyAt) state.questionReadyAt = Date.now();
 }
 
-function markGoalSpoken(text) {
-  const goal = currentGoalRecord();
+function markGoalSpokenFor(taskId, text) {
+  const goal = goalRecord(taskId);
   const wordCount = normalizedSpeech(text).split(' ').filter(Boolean).length;
   goal.spoke = true;
   goal.wordCount = Math.max(goal.wordCount, wordCount);
   goal.utterance = String(text || '').trim();
+  goal.language = /\p{Script=Han}/u.test(goal.utterance)
+    ? (/[a-z]/i.test(goal.utterance) ? 'mixed' : 'zh')
+    : /[a-z]/i.test(goal.utterance) ? 'en' : 'unknown';
   if (state.questionReadyAt && !goal.responseLatencyMs) goal.responseLatencyMs = Math.max(0, Date.now() - state.questionReadyAt);
 }
+
+function markGoalSpoken(text) { markGoalSpokenFor(currentTask().id, text); }
 
 function recordHint() {
   const goal = currentGoalRecord();
   goal.hints += 1;
   state.hintsUsed += 1;
+  globalThis.LumaExperience?.noteHelp(3, 'example');
 }
 
 function learningTotals() {
@@ -769,55 +1244,13 @@ function learningTotals() {
 }
 
 function syncLearningUi() {
-  const totals = learningTotals();
-  const ratio = (value, total) => total ? Math.min(1, value / total) : 0;
-  const heardRate = ratio(totals.heard, totals.goals);
-  const actionRate = ratio(totals.actions, totals.actionRequired);
-  const spokenRate = ratio(totals.spoken, totals.speechRequired);
-  const transferRate = totals.scenes.size > 1 ? Math.min(1, (totals.scenes.size - 1) / 2) : 0;
-  const score = Math.round((heardRate + actionRate + spokenRate + transferRate) * 25);
-  abilityPercent.textContent = String(score);
-  abilityOrbit.setAttribute('aria-label', `学习闭环完成度 ${score}%`);
-  abilityOrbit.style.background = `conic-gradient(var(--orange) ${score}%, rgba(11,12,18,.1) 0)`;
-  abilityTitle.textContent = score >= 75 ? '正在把英语带进真实环境' : score >= 35 ? '开始建立声音、动作和表达的连接' : '先完成一个真实情境';
-  abilityDescription.textContent = totals.goals
-    ? `累计听懂 ${totals.heard} 个情境目标，完成 ${totals.spoken} 次有效回应。`
-    : '完成第一个情境后，这里会记录真实能力，而不是背过多少单词。';
-  growthHeard.textContent = `${totals.heard} 个情境目标`;
-  growthActions.textContent = `${totals.actions} 个有效动作`;
-  growthSpoken.textContent = `${totals.spoken} 次有效回应`;
-  growthTransfer.textContent = totals.scenes.size > 1 ? `已在 ${totals.scenes.size} 个环境练习` : '等待第二个环境';
-  growthHeardMeter.style.width = `${Math.round(heardRate * 100)}%`;
-  growthActionsMeter.style.width = `${Math.round(actionRate * 100)}%`;
-  growthSpokenMeter.style.width = `${Math.round(spokenRate * 100)}%`;
-  growthTransferMeter.style.width = `${Math.round(transferRate * 100)}%`;
-  profileHeard.textContent = String(totals.heard);
-  profileActions.textContent = String(totals.actions);
-  profileSpoken.textContent = String(totals.spoken);
+  globalThis.LumaExperience?.render();
 }
 
 function saveLearningSession() {
-  if (state.sessionSaved) return;
-  const tasks = currentSceneConfig().tasks;
-  const goals = tasks.map((task) => state.sessionGoals[task.id]).filter(Boolean);
-  const latencies = goals.map((goal) => goal.responseLatencyMs).filter(Boolean);
-  learningProfile.sessions.push({
-    scene: state.selectedScene,
-    mode: state.practiceMode,
-    finishedAt: new Date().toISOString(),
-    durationMs: Math.max(0, Date.now() - state.sessionStartedAt),
-    goalCount: tasks.length,
-    heardCount: goals.filter((goal) => goal.heard).length,
-    actionRequired: tasks.filter(taskHasAction).length,
-    actionCount: goals.filter((goal) => goal.acted).length,
-    speechRequired: tasks.filter(taskNeedsSpeech).length,
-    spokenCount: goals.filter((goal) => goal.spoke).length,
-    hints: goals.reduce((sum, goal) => sum + goal.hints, 0),
-    averageResponseMs: latencies.length ? Math.round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length) : 0,
-  });
-  learningProfile.sessions = learningProfile.sessions.slice(-30);
-  localStorage.setItem(LEARNING_PROFILE_KEY, JSON.stringify(learningProfile));
+  if (state.sessionSaved || state.stage !== 'complete') return;
   state.sessionSaved = true;
+  globalThis.LumaExperience?.complete();
   syncLearningUi();
 }
 
@@ -841,17 +1274,22 @@ function renderDialogue() {
       if (status.textContent !== (message.status || '')) status.textContent = message.status || '';
     }
   };
-  const recent = state.dialogueHistory.slice(-2);
+  const taskMessages = state.dialogueHistory.filter(message => message.taskId === currentTask().id);
+  // The live scene only needs the current exchange. Earlier turns stay in
+  // “全部对话”; pinning an older accepted answer created a third card and hid
+  // the newest reply behind an inner scrollbar.
+  const recent = taskMessages.slice(-2);
   updateList(recentDialogue, recent);
   if (dialogueHistory.classList.contains('is-open')) updateList(dialogueHistoryList, state.dialogueHistory);
   languagePanel.hidden = recent.length === 0;
-  openDialogueHistory.hidden = state.dialogueHistory.length <= 2;
+  openDialogueHistory.hidden = state.dialogueHistory.length === 0;
+  languagePanel.scrollTop = languagePanel.scrollHeight;
 }
 
 function addDialogueMessage(speaker, text, name = '') {
   const clean = String(text || '').trim();
   if (!clean) return null;
-  state.dialogueHistory.push({ id: ++state.messageSerial, revision: 1, speaker, name, text: clean });
+  state.dialogueHistory.push({ id: ++state.messageSerial, revision: 1, speaker, name, text: clean, taskId: currentTask().id });
   const index = state.dialogueHistory.length - 1;
   if (speaker === 'user') state.pendingUserIndex = index;
   renderDialogue();
@@ -860,6 +1298,11 @@ function addDialogueMessage(speaker, text, name = '') {
 
 function latestCharacterText() {
   return [...state.dialogueHistory].reverse().find((message) => message.speaker === 'luma')?.text || '';
+}
+
+function latestFollowupText() {
+  const lastAnswer = state.dialogueHistory.findLastIndex(message => message.speaker === 'user' && message.final);
+  return state.dialogueHistory.slice(lastAnswer + 1).findLast(message => message.speaker === 'luma')?.text || '';
 }
 
 function clearCharacterCaptionReveal({ complete = false } = {}) {
@@ -876,9 +1319,19 @@ function beginCharacterCaptionReveal(text) {
   const clean = String(text || '').trim();
   if (!clean) return;
   clearCharacterCaptionReveal();
-  state.currentSpeech = clean; state.activeQuestion = clean;
+  state.currentSpeech = clean;
+  globalThis.LumaVisuals?.speech(clean);
+  // A demonstration such as “Yes, please” is not the question being answered.
+  if (state.expectedResponse?.kind === 'say' ? state.expectedResponse.updatesQuestion : DialogueRules.isQuestion(clean)) state.activeQuestion = clean;
   state.captionCharacters = Array.from(clean);
-  state.streamingLumaIndex = addDialogueMessage('luma', '…', currentTask().speaker || 'Luma');
+  const pendingIndex = state.dialogueHistory.findLastIndex(message => message.speaker === 'luma' && message.pendingPlayback && message.taskId === currentTask().id);
+  state.streamingLumaIndex = pendingIndex >= 0 ? pendingIndex : addDialogueMessage('luma', '…', currentTask().speaker || 'Luma');
+  if (pendingIndex >= 0) {
+    const pending = state.dialogueHistory[pendingIndex];
+    pending.text = clean; pending.status = ''; delete pending.pendingPlayback;
+    state.captionVisibleCount = state.captionCharacters.length;
+    renderDialogue();
+  }
   state.characterTurnId += 1;
   const generation = state.playbackGeneration;
   const reveal = () => {
@@ -910,8 +1363,8 @@ function scheduleIdleNudge() {
   clearIdleNudge();
   const task = currentTask();
   const hasMissingStep = (taskNeedsSpeech(task) && !state.speechDone) || (taskNeedsAction(task) && !state.actionDone);
-  if (!state.sceneStarted || !hasMissingStep || state.micMuted || ['complete', 'task-complete'].includes(state.stage)) return;
-  const delay = state.idleNudgeCount === 0 ? 8500 : state.idleNudgeCount === 1 ? 12000 : 18000;
+  if (!state.sceneStarted || !hasMissingStep || state.micMuted || state.idleNudgeCount >= 2 || ['complete', 'task-complete'].includes(state.stage)) return;
+  const delay = state.idleNudgeCount === 0 ? 12000 : 18000;
   const nudgeWhenQuiet = () => {
     const liveTask = currentTask();
     const stillMissing = (taskNeedsSpeech(liveTask) && !state.speechDone) || (taskNeedsAction(liveTask) && !state.actionDone);
@@ -920,10 +1373,13 @@ function scheduleIdleNudge() {
       state.idleNudgeTimer = setTimeout(nudgeWhenQuiet, 1200);
       return;
     }
-    const text = characterHintLine(Math.min(state.idleNudgeCount + 1, 3));
     state.idleNudgeCount += 1;
-    recordHint();
-    speakCharacterCue(text);
+    if (state.idleNudgeCount === 1) showToast('慢慢来。可以直接说“什么意思”或“怎么说”。', 6500);
+    else {
+      globalThis.LumaExperience?.noteHelp(1, 'idle-meaning');
+      showToast(speechSupportForTask(liveTask).meaning, 10000);
+    }
+    scheduleIdleNudge();
   };
   state.idleNudgeTimer = setTimeout(nudgeWhenQuiet, delay);
 }
@@ -946,15 +1402,107 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
   const sameTask = state.selectedScene === context.sceneId && currentTask().id === context.taskId
     && state.taskIndex === context.taskIndex && state.stage === 'active';
   if (!sameTask) return;
-  if (Breakfast.isTask(context.taskId)) {
-    if (feedback.meaning_valid === true && feedback.choice) commitBreakfastChoice(feedback.choice, { utterance: message.text });
+  const inputSource = context.source || 'voice';
+  if (!['voice', 'speech'].includes(inputSource)) return;
+  if (feedback.technical_error) {
+    message.inputSource = inputSource;
+    message.status = '暂未确认 · 回答已保留，可继续说或点提示';
+    renderDialogue();
+    globalThis.LumaExperience?.noteAnswer(context, 'technical-error');
+    showToast('暂时没能理解这句，可以换个说法或点提示。不会记成答错。', 5200);
+    if (!isConversationTurnPending()) { openLearnerTurn(); scheduleIdleNudge(); }
     return;
   }
-  if (feedback.meaning_valid !== true) return;
-  if (isActionAcknowledgement(currentTask(), message.text, context.question)) return;
+  message.inputSource = inputSource;
+  if (state.selectedScene === 'coffee' && Coffee.isTask(context.taskId)) {
+    const eventId = `${context.evidenceSessionId || state.practiceSession}:${context.messageId}:${context.revision}`;
+    let missionFeedback = feedback.missionResult || Coffee.advanceMission(state.coffee, message.text, {
+      eventId, expectedRevision: state.coffee?.revision,
+    });
+    if (!feedback.missionResult && feedback.choice && missionFeedback.accepted) {
+      const interpreted = Object.values(missionFeedback.interpretation?.slots || {});
+      const agrees = interpreted.includes(feedback.choice)
+        || (feedback.choice === 'thanks' && missionFeedback.interpretation?.gratitude);
+      if (!agrees) missionFeedback = { ...missionFeedback, accepted: false, reason: 'conflicting-feedback' };
+    }
+    if (!missionFeedback.accepted && !missionFeedback.handled && feedback.choice) missionFeedback = Coffee.advanceMission(state.coffee, feedback.choice, {
+      eventId, expectedRevision: state.coffee?.revision,
+    });
+    if (missionFeedback.accepted) {
+      const mismatch = missionFeedback.targetMismatches?.[0];
+      const resolvedCurrentStep = !missionFeedback.nextStep?.taskId || missionFeedback.nextStep.taskId !== currentTask().id;
+      const labels = { drink: '咖啡种类', size: '杯型', service: '堂食或带走' };
+      const acceptedStatus = mismatch
+        ? `已确认 ${missionFeedback.changedFields?.length || 1} 项 · ${labels[mismatch.field] || '一项'}再试一次`
+        : '已确认';
+      const committed = commitCoffeeChoice(feedback.choice, {
+        utterance: message.text, source: inputSource, missionFeedback, context,
+      });
+      message.taskAccepted = committed && resolvedCurrentStep;
+      message.status = committed ? acceptedStatus : '未确认 · 请再试一次';
+      renderDialogue();
+    }
+    else {
+      globalThis.LumaExperience?.noteAnswer(context, 'unconfirmed');
+      if (missionFeedback.reason === 'question' || missionFeedback.reason === 'help') {
+        if (missionFeedback.reason === 'help') {
+          const supportLevel = missionFeedback.help === 'meaning' || missionFeedback.help === 'repeat' ? 1 : 3;
+          globalThis.LumaExperience?.noteHelp?.(supportLevel, `conversation-${missionFeedback.help || 'help'}`);
+        }
+        // The realtime character already has this learner turn and can answer
+        // the actual question or help request in context. Starting a second
+        // explicit prompt here would cancel that reply and mechanically repeat
+        // the task question, which makes natural requests feel stuck.
+        message.status = '继续当前对话';
+        renderDialogue();
+      } else if (missionFeedback.reason === 'target-mismatch') {
+        const field = missionFeedback.targetMismatches?.[0]?.field;
+        const labels = { drink: '咖啡种类', size: '杯型', service: '堂食或带走' };
+        message.taskAccepted = false;
+        message.status = `${labels[field] || '这一项'}与任务不一致 · 再试一次`;
+        renderDialogue();
+        state.currentSpeech = missionFeedback.prompt;
+        state.activeQuestion = missionFeedback.prompt;
+        clearIdleNudge();
+        speak(missionFeedback.prompt).then(started => {
+          if (!started) showToast(`Mia：${missionFeedback.prompt}`, 5200);
+          scheduleIdleNudge();
+        });
+      } else if (missionFeedback.prompt) {
+        state.currentSpeech = missionFeedback.prompt;
+        state.activeQuestion = missionFeedback.prompt;
+        clearIdleNudge();
+        speak(missionFeedback.prompt).then(started => {
+          if (!started) showToast(`Mia：${missionFeedback.prompt}`, 5200);
+          scheduleIdleNudge();
+        });
+      }
+    }
+    return;
+  }
+  const acknowledgement = isActionAcknowledgement(currentTask(), message.text, context.question);
+  const offered = /^(?:here|here you (?:are|go))[.!]?$/i.test(message.text.trim());
+  const accepted = feedback.meaning_valid === true && (!acknowledgement || offered);
+  globalThis.LumaExperience?.noteAnswer(context, accepted ? 'success' : 'unconfirmed');
+  if (Breakfast.isTask(context.taskId)) {
+    const committed = feedback.meaning_valid === true && feedback.choice
+      && commitBreakfastChoice(feedback.choice, { utterance: message.text, source: inputSource });
+    message.taskAccepted = Boolean(committed);
+    message.status = committed ? '已确认' : '还没确认这一项 · 可继续说或点提示';
+    renderDialogue();
+    if (!committed) scheduleIdleNudge();
+    return;
+  }
+  if (!accepted) {
+    message.status = '还没确认这一项 · 可继续说或点提示';
+    renderDialogue(); scheduleIdleNudge(); return;
+  }
+  message.taskAccepted = true; message.status = '已确认'; renderDialogue();
   state.lastTranscript = message.text;
   state.speechDone = true;
-  markGoalSpoken(message.text);
+  if (['voice', 'speech'].includes(message.inputSource)) markGoalSpoken(message.text);
+  currentGoalRecord().meaningAccepted = true;
+  globalThis.LumaExperience?.checkpoint();
   state.pendingPostActionQuestion = false;
   clearTimeout(state.postActionQuestionTimer);
   state.postActionQuestionTimer = null;
@@ -966,10 +1514,18 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
 
 async function requestLanguageFeedback(question, answer, turnContext = {}) {
   const context = { ...captureUserTurnContext(), ...turnContext, question, answer };
-  if (!context.final || context.practiceSession !== state.practiceSession) return;
+  if (!context.final || context.practiceSession !== state.practiceSession || DialogueRules.supportIntent(answer)) return;
   if (Breakfast.isTask(context.taskId)) {
     const choice = Breakfast.choiceFromText(context.taskId, answer, question);
     if (choice) { applyDynamicFeedback({ meaning_valid: true, choice }, context); return; }
+  } else if (state.selectedScene === 'coffee' && Coffee.isTask(context.taskId)) {
+    const eventId = `${context.evidenceSessionId || state.practiceSession}:${context.messageId}:${context.revision}`;
+    const missionResult = Coffee.advanceMission(state.coffee, answer, { eventId, expectedRevision: state.coffee?.revision });
+    if (missionResult.accepted || missionResult.handled) {
+      applyDynamicFeedback({ meaning_valid: missionResult.accepted, missionResult }, context); return;
+    }
+  } else if (isCurrentTaskQuestion(question) && DialogueRules.matchesTask(context.taskId, answer)) {
+    applyDynamicFeedback({ meaning_valid: true }, context); return;
   }
   const controller = new AbortController();
   state.pendingFeedback.add(controller);
@@ -977,14 +1533,100 @@ async function requestLanguageFeedback(question, answer, turnContext = {}) {
   try {
     const response = await fetch('/api/feedback', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, answer, sceneId: context.sceneId, taskId: context.taskId }),
+      body: JSON.stringify({ question, answer, sceneId: context.sceneId, taskId: context.taskId, coffee: state.coffee }),
       signal: controller.signal,
     });
     if (!response.ok) throw new Error('feedback_unavailable');
     applyDynamicFeedback(await response.json(), context);
   } catch {
-    applyDynamicFeedback(fallbackMeaningFeedback(answer, context.taskId), context);
+    const fallback = fallbackMeaningFeedback(answer, context.taskId);
+    applyDynamicFeedback(fallback.meaning_valid ? fallback : { technical_error: true }, context);
   } finally { clearTimeout(timer); state.pendingFeedback.delete(controller); }
+}
+
+function coffeeTaskForChangedField(field) {
+  if (field === 'drink') return 'coffee-order';
+  if (field === 'size' || field === 'delivered.size') return 'coffee-size';
+  if (field === 'service') return 'coffee-service';
+  if (field === 'received') return 'coffee-thanks';
+  return null;
+}
+
+function recordCoffeeMissionEvidence(result, context, utterance, source) {
+  const mismatches = new Set([
+    ...(result.comparison?.mismatches || []).map(item => item.field),
+    ...(result.targetMismatches || []).map(item => item.field),
+  ]);
+  const taskIds = [...new Set((result.changedFields || []).map(coffeeTaskForChangedField).filter(Boolean))];
+  const currentSupport = goalRecord(context.taskId);
+  for (const taskId of taskIds) {
+    const field = taskId === 'coffee-order' ? 'drink' : taskId === 'coffee-size' ? 'size' : taskId === 'coffee-service' ? 'service' : 'received';
+    const success = !mismatches.has(field);
+    const goal = goalRecord(taskId);
+    goal.supportLevel = Math.max(goal.supportLevel || 0, currentSupport.supportLevel || context.supportLevel || 0);
+    goal.supportKinds = [...new Set([...(goal.supportKinds || []), ...(currentSupport.supportKinds || [])])];
+    if (success) {
+      goal.meaningAccepted = true;
+      markGoalSpokenFor(taskId, utterance);
+    }
+    globalThis.LumaExperience?.noteAnswer({ ...context, taskId,
+      messageId: `${context.messageId}:${taskId}`, answer: utterance, source }, success ? 'success' : 'unconfirmed');
+    if (success && taskId !== context.taskId && currentSceneConfig().tasks.some(task => task.id === taskId)) state.coveredGoals.add(taskId);
+  }
+  for (const mismatch of result.targetMismatches || []) {
+    const taskId = coffeeTaskForChangedField(mismatch.field);
+    if (!taskId) continue;
+    globalThis.LumaExperience?.noteAnswer({ ...context, taskId,
+      messageId: `${context.messageId}:${taskId}:mismatch`, answer: utterance, source }, 'unconfirmed');
+  }
+}
+
+function commitCoffeeChoice(choice, { source = 'voice', utterance = '', missionFeedback = null, context = null } = {}) {
+  if (state.selectedScene !== 'coffee' || state.stage !== 'active' || !String(utterance).trim()
+    || !['voice', 'speech'].includes(source)) return false;
+  const expectedStep = Coffee.nextMissionStep?.(state.coffee);
+  if (expectedStep?.taskId && expectedStep.taskId !== currentTask().id) return false;
+  const eventId = context ? `${context.evidenceSessionId || state.practiceSession}:${context.messageId}:${context.revision}` : '';
+  let result = missionFeedback || Coffee.advanceMission(state.coffee, utterance, { eventId, expectedRevision: state.coffee?.revision });
+  if (!result.accepted && choice) result = Coffee.advanceMission(state.coffee, choice, { eventId, expectedRevision: state.coffee?.revision });
+  if (!result.accepted || !result.world) return false;
+  state.coffee = result.world;
+  state.coffeeMissionId = result.world.missionId || state.coffeeMissionId;
+  state.coffeeVariantId = result.world.variantId || state.coffeeVariantId;
+  state.lastTranscript = utterance;
+  const resolvedCurrentStep = !result.nextStep?.taskId || result.nextStep.taskId !== currentTask().id;
+  if (context) recordCoffeeMissionEvidence(result, context, utterance, source);
+  else {
+    markGoalSpoken(utterance);
+    if (resolvedCurrentStep) currentGoalRecord().meaningAccepted = true;
+  }
+  state.speechDone = resolvedCurrentStep;
+  state.actionDone = true;
+  if (resolvedCurrentStep) currentGoalRecord().meaningAccepted = true;
+  if (!resolvedCurrentStep && result.prompt) {
+    state.currentSpeech = result.prompt;
+    state.activeQuestion = result.prompt;
+  }
+  globalThis.LumaVisuals?.render();
+  globalThis.LumaExperience?.checkpoint();
+  syncSceneProgress();
+  if (resolvedCurrentStep) {
+    // The mission engine has already made the authoritative decision. Cancel
+    // any free-form provider reply that raced the final ASR result, then let
+    // the app speak its short deterministic acknowledgment and advance.
+    stopSpeechPlayback();
+    completeMultimodalTask();
+  }
+  else {
+    stopSpeechPlayback();
+    updateDuplexTask({ force: true });
+    if (result.prompt) speak(result.prompt).then(started => {
+      if (!started) showToast(`Mia：${result.prompt}`, 5200);
+      scheduleIdleNudge();
+    });
+    else scheduleIdleNudge();
+  }
+  return true;
 }
 
 function openDialogueHistoryPanel() {
@@ -1008,19 +1650,26 @@ function syncA11yState() {
     view.setAttribute('aria-hidden', String(hidden));
     view.inert = hidden;
   });
-  bottomNav.setAttribute('aria-hidden', String(overlayOpen));
-  bottomNav.inert = overlayOpen;
+  const navHidden = overlayOpen || state.activeView === 'profile';
+  bottomNav.setAttribute('aria-hidden', String(navHidden));
+  bottomNav.inert = navHidden;
 }
 
 function showView(name) {
+  const current = views.find((view) => view.dataset.view === state.activeView);
+  const currentScroll = current?.querySelector('.view-scroll');
+  if (currentScroll) viewScrollPositions.set(state.activeView, currentScroll.scrollTop);
+  if (name === 'profile' && state.activeView !== 'profile') profileReturnView = state.activeView;
   state.activeView = name;
   if (name === 'growth' || name === 'profile') syncLearningUi();
-  appShell.scrollTop = 0;
   views.forEach((view) => view.classList.toggle('is-active', view.dataset.view === name));
   bottomNav.querySelectorAll('button').forEach((button) => button.classList.toggle('is-active', button.dataset.nav === name));
   const active = views.find((view) => view.dataset.view === name);
-  active?.querySelector('.view-scroll')?.scrollTo({ top: 0, behavior: 'auto' });
-  requestAnimationFrame(() => { appShell.scrollTop = 0; });
+  loadDeferredImages(active);
+  const activeScroll = active?.querySelector('.view-scroll');
+  const savedTop = viewScrollPositions.get(name) || 0;
+  activeScroll?.scrollTo({ top: savedTop, behavior: 'auto' });
+  requestAnimationFrame(() => { appShell.scrollTop = 0; if (activeScroll) activeScroll.scrollTop = savedTop; });
   syncA11yState();
 }
 
@@ -1028,21 +1677,43 @@ function renderPeople(items) {
   sheetPeople.innerHTML = items.map(([icon, label]) => `<span><i class="ph ph-${icon}"></i> ${label}</span>`).join('');
 }
 
-function openSheet(sceneName, trigger = document.activeElement) {
+function openSheet(sceneName, trigger = document.activeElement, missionId = null) {
   const data = SCENES[sceneName] ?? SCENES.kitchen;
-  state.selectedScene = sceneName;
-  sheetImage.src = data.image;
+  const recentSceneCheckpoint = globalThis.LumaExperience?.store?.getCheckpoint?.({ sceneId: sceneName });
+  const savedMission = recentSceneCheckpoint?.sceneId === 'coffee' && COFFEE_MISSION_UI[recentSceneCheckpoint.missionId]
+    ? recentSceneCheckpoint.missionId : null;
+  const requestedMission = sceneName === 'coffee'
+    ? (COFFEE_MISSION_UI[missionId] ? missionId : savedMission || Object.keys(COFFEE_MISSION_UI).find(id => !coffeeMissionProgress.completed.includes(id)) || 'C04')
+    : null;
+  const mission = requestedMission ? COFFEE_MISSION_UI[requestedMission] : null;
+  const checkpoint = globalThis.LumaExperience?.store?.getCheckpoint?.({
+    sceneId: sceneName,
+    missionId: requestedMission || undefined,
+  });
+  const missionImages = { C01: './assets/coffee/order.webp', C02: './assets/coffee/order.webp', C03: './assets/coffee/size.webp', C04: './assets/coffee/service.webp' };
+  const missionGoals = {
+    C01: '点一杯自己喜欢的咖啡',
+    C02: '小杯拿铁，带走',
+    C03: '发现杯型不对，并请 Mia 换回来',
+    C04: '不看字幕，独立完成一张新订单',
+  };
+  const available = data.available && (!requestedMission || coffeeMissionIsUnlocked(requestedMission));
+  sheetSelection = { sceneId: sceneName, missionId: requestedMission, resumeCheckpoint: checkpoint || null };
+  sheetImage.src = missionImages[requestedMission] || data.previewImage || data.image;
   sheetImage.alt = `${data.title}情境预览`;
-  sheetBadge.textContent = data.badge;
-  sheetEyebrow.textContent = data.eyebrow;
-  sheetTitle.textContent = data.title;
-  sheetDescription.textContent = data.description;
-  sheetGoal.textContent = data.goal;
-  renderPeople(data.people);
-  sheetCta.disabled = !data.available;
-  sheetCta.innerHTML = data.available
-    ? '进入真实情境 <i class="ph ph-arrow-right"></i>'
-    : '这个真实环境正在搭建 <i class="ph ph-lock-simple"></i>';
+  sheetBadge.textContent = requestedMission ? `任务 ${requestedMission}` : data.badge;
+  sheetEyebrow.textContent = requestedMission ? '街角的第一杯 · 当前事件' : data.eyebrow;
+  sheetTitle.textContent = mission?.title || data.title;
+  sheetDescription.textContent = mission?.brief || data.description;
+  sheetGoal.textContent = missionGoals[requestedMission] || data.goal;
+  const people = requestedMission
+    ? [...data.people.slice(0, 2), ['flag', `${Coffee.getMission(requestedMission)?.taskIds.length || 4} 个对话步骤`]]
+    : data.people;
+  renderPeople(people);
+  sheetCta.disabled = !available;
+  sheetCta.innerHTML = available
+    ? `${checkpoint ? (sceneName === 'coffee' ? '从头再练这一任务' : '继续这一事件') : requestedMission ? '开始这一事件' : '进入真实情境'} <i class="ph ph-arrow-right"></i>`
+    : `${requestedMission ? '先完成前一件事' : '这个真实环境正在搭建'} <i class="ph ph-lock-simple"></i>`;
   sceneSheet.classList.add('is-open');
   sceneSheet.setAttribute('aria-hidden', 'false');
   sheetTrigger = trigger instanceof HTMLElement ? trigger : null;
@@ -1054,6 +1725,7 @@ function closeSheet() {
   const returnTarget = sheetTrigger;
   sceneSheet.classList.remove('is-open');
   sceneSheet.setAttribute('aria-hidden', 'true');
+  sheetSelection = null;
   sheetTrigger = null;
   syncA11yState();
   requestAnimationFrame(() => returnTarget?.focus());
@@ -1190,9 +1862,15 @@ function configureScene() {
   const config = currentSceneConfig();
   backgroundPlane.src = config.image;
   backgroundBlur.src = config.image;
+  if (state.selectedScene === 'kitchen') loadDeferredImages(apple);
+  globalThis.LumaVisuals?.clear();
   scene.dataset.scene = state.selectedScene;
   experience.setAttribute('aria-label', `${SCENES[state.selectedScene].title}互动情境`);
   const interactiveIds = config.tasks.filter((task) => task.interaction === 'tap').map((task) => task.id);
+  const hasDragTask = config.tasks.some((task) => task.interaction === 'drag');
+  objectLayer.hidden = !hasDragTask && interactiveIds.length === 0;
+  apple.hidden = !hasDragTask;
+  apple.disabled = !hasDragTask;
   hotspots.forEach((hotspot, index) => {
     const id = interactiveIds[index];
     hotspot.dataset.object = id || '';
@@ -1235,15 +1913,38 @@ function clearCharacterTurnWatchdog() {
   state.characterWatchdogTimer = null;
 }
 
-function armCharacterTurnWatchdog(delayMs = 8000) {
-  clearCharacterTurnWatchdog();
+function armCharacterTurnWatchdog(delayMs = 1000) {
+  // Audio packets can arrive several times a second. Keep the existing timer
+  // so a provider cannot postpone the absolute deadline by continually
+  // rearming it with tiny chunks.
+  if (state.characterWatchdogTimer) return;
+  if (!state.lumaStartedAt) state.lumaStartedAt = Date.now();
   const generation = state.playbackGeneration;
   state.characterWatchdogTimer = setTimeout(() => {
+    state.characterWatchdogTimer = null;
     if (generation !== state.playbackGeneration || !state.duplexSpeaking || state.duplexOutputDone) return;
-    const quietFor = Date.now() - state.lastDuplexAudioAt;
-    if (quietFor < 8000 || isConversationPlaybackActive()) { armCharacterTurnWatchdog(1000); return; }
-    settleFailedDuplexTurn();
-    showToast('声音暂时中断，可以继续说或点重听。');
+    const now = Date.now();
+    if (now - state.lumaStartedAt >= CHARACTER_TURN_MAX_MS) {
+      const taskDone = settleFailedDuplexTurn();
+      showToast(taskDone ? '回答已确认，已继续下一步。' : '这段声音已停止，问题已显示，可以直接回答。');
+      return;
+    }
+    const playbackActive = isConversationPlaybackActive();
+    const playbackTime = Number(state.duplexPlayerContext?.currentTime);
+    if (playbackActive && Number.isFinite(playbackTime)) {
+      if (!state.duplexClockAdvancedAt || playbackTime > state.duplexClockTime + .01) {
+        state.duplexClockTime = playbackTime;
+        state.duplexClockAdvancedAt = now;
+      } else if (now - state.duplexClockAdvancedAt >= CHARACTER_CLOCK_STALL_MS) {
+        const taskDone = settleFailedDuplexTurn();
+        showToast(taskDone ? '回答已确认，已继续下一步。' : '声音播放暂停了，问题已显示，可以直接回答。');
+        return;
+      }
+    }
+    const quietFor = now - state.lastDuplexAudioAt;
+    if (quietFor < CHARACTER_AUDIO_QUIET_MS || playbackActive) { armCharacterTurnWatchdog(1000); return; }
+    const taskDone = settleFailedDuplexTurn();
+    showToast(taskDone ? '回答已确认，已继续下一步。' : '声音没有播出来，问题已显示，可以直接回答。');
   }, delayMs);
 }
 
@@ -1258,12 +1959,13 @@ function armReplyTimeout() {
   const expectedId = state.expectedResponse?.id;
   state.replyTimer = setTimeout(() => {
     if (state.expectedResponse?.id !== expectedId || isConversationPlaybackActive()) return;
-    settleFailedDuplexTurn();
-    showToast('这次没接上，我们继续。也可以点重听。', 3000);
+    const taskDone = settleFailedDuplexTurn();
+    showToast(taskDone ? '回答已确认，正在继续下一步。' : '语音暂时没接上，问题已显示，可以直接回答。', 3000);
   }, 10000);
 }
 
 function stopDuplexPlayback({ cancel = true } = {}) {
+  const cancelUpstream = cancel && state.expectedResponse && !state.duplexOutputDone;
   state.playbackGeneration += 1;
   clearCharacterTurnWatchdog(); clearCharacterCaptionReveal();
   clearTimeout(state.firstPacketTimer); state.firstPacketTimer = null;
@@ -1273,13 +1975,15 @@ function stopDuplexPlayback({ cancel = true } = {}) {
   state.duplexSources.forEach(source => { try { source.stop(); } catch {} });
   state.duplexSources.clear(); state.duplexNextPlayTime = 0;
   state.duplexAudioQueue = Promise.resolve();
+  state.lumaStartedAt = 0; state.lastDuplexAudioAt = 0;
+  state.duplexClockTime = 0; state.duplexClockAdvancedAt = 0;
   state.duplexSpeaking = false; state.duplexOutputDone = false;
   if (cancel) {
     state.duplexAcceptAudio = false; retireExpectedResponse();
     state.duplexResponseText = ''; state.duplexPendingSubtitle = '';
     state.duplexResponseIsPrompt = false; state.duplexValidatedText = false;
     state.duplexAfter = null;
-    if (state.duplexReady) sendDuplex({ type: 'response.cancel' });
+    if (state.duplexReady && cancelUpstream) sendDuplex({ type: 'response.cancel' });
   }
 }
 
@@ -1297,7 +2001,9 @@ function isConversationPlaybackActive() {
 }
 
 function isConversationTurnPending() {
-  return state.awaitingPrompt
+  return state.deferredVoiceEvents.length > 0
+    || Boolean(state.activeVoiceTurn)
+    || state.awaitingPrompt
     || state.awaitingModelReply
     || state.userTurnActive
     || state.localSpeechActive
@@ -1319,12 +2025,42 @@ function scheduledCharacterLineBlocked() {
 }
 
 function settleFailedDuplexTurn() {
+  const unplayed = state.dialogueHistory.findLast(item => item.speaker === 'luma' && item.pendingPlayback && item.taskId === currentTask().id);
+  const pendingText = state.duplexValidatedText ? state.duplexPendingSubtitle : '';
   const turn = state.activeVoiceTurn;
   const message = state.dialogueHistory.find(item => item.id === turn?.messageId);
-  if (message && !message.final) { message.status = '识别未完成'; renderDialogue(); }
+  if (message && !message.final) { message.status = '未确认 · 请再说一次'; renderDialogue(); }
   stopSpeechPlayback(); clearUserTurn(); clearLocalSpeechTurn();
+  if (unplayed) showUnplayedCharacterLine(unplayed.text, unplayed.updatesQuestion !== false);
+  else if (pendingText) showUnplayedCharacterLine(pendingText, false);
+  else if (state.stage === 'active' && state.dialogueHistory.at(-1)?.speaker !== 'luma') {
+    // Keep a real route back into the task in the conversation, not only in
+    // an expiring toast. Neither provider failure nor unrelated speech passes
+    // the task or takes away the ability to answer / ask for help.
+    const prompt = state.activeQuestion || currentTask().question || currentTask().prompt;
+    if (prompt) {
+      showUnplayedCharacterLine(prompt, true);
+      const recovery = state.dialogueHistory.at(-1);
+      if (recovery?.speaker === 'luma') recovery.status = '可继续回答 · 也可以点提示';
+      renderDialogue();
+    }
+  }
   state.duplexTranscript = ''; state.nudgeInFlight = false;
-  openLearnerTurn(); scheduleIdleNudge(); syncVoiceStatus();
+  // Events captured while the failed line owned the floor must be released or
+  // discarded with that connection. Leaving one queued event here kept the
+  // transition scheduler permanently busy after an otherwise accepted answer.
+  flushDeferredVoiceEvents();
+  if (!state.duplexSocket) state.deferredVoiceEvents = [];
+  flushMicrophoneBuffer();
+  const taskDone = ['task-complete', 'complete'].includes(state.stage);
+  if (taskDone && unplayed) {
+    const recovery = [...state.dialogueHistory].reverse().find(item => item.speaker === 'luma');
+    if (recovery) { recovery.status = '声音没播完 · 已继续'; renderDialogue(); }
+  }
+  if (taskDone) openCourtesyTurn();
+  else openLearnerTurn();
+  scheduleIdleNudge(); syncVoiceStatus();
+  return taskDone;
 }
 
 function finishDuplexTurnWhenAudioEnds() {
@@ -1335,9 +2071,12 @@ function finishDuplexTurnWhenAudioEnds() {
   const remaining = context ? Math.max(0, state.duplexNextPlayTime - context.currentTime) : 0;
   state.duplexFinishTimer = setTimeout(() => {
     if (generation !== state.playbackGeneration || !state.duplexOutputDone) return;
+    if (isConversationPlaybackActive()) { settleFailedDuplexTurn(); return; }
     state.lastCharacterEndedAt = Date.now();
     clearCharacterCaptionReveal({ complete: true });
     state.duplexSpeaking = false;
+    state.lumaStartedAt = 0; state.lastDuplexAudioAt = 0;
+    state.duplexClockTime = 0; state.duplexClockAdvancedAt = 0;
     clearCharacterTurnWatchdog();
     clearReplyTimeout();
     state.awaitingModelReply = false;
@@ -1353,6 +2092,10 @@ function finishDuplexTurnWhenAudioEnds() {
     const after = state.duplexAfter;
     state.duplexAfter = null;
     state.awaitingPrompt = false;
+    // Deliver anything captured while this line was playing before a task
+    // transition or another scheduled character cue can take the floor.
+    flushDeferredVoiceEvents();
+    flushMicrophoneBuffer();
     if (state.stage === 'active' && currentTask().autoAdvance) completeMultimodalTask();
     const taskDone = ['complete', 'task-complete'].includes(state.stage);
     const liveLabel = liveTaskModeLabel();
@@ -1372,7 +2115,7 @@ function finishDuplexTurnWhenAudioEnds() {
     after?.();
     if (state.sceneStarted && !state.handsFreeListening && !state.micMuted && !taskDone) startHandsFreeListening().catch(() => {});
     scheduleIdleNudge();
-  }, remaining * 1000 + 160);
+  }, Math.min(remaining * 1000 + 160, CHARACTER_TURN_MAX_MS));
 }
 
 async function enqueueDuplexPcm(base64, generation = state.playbackGeneration) {
@@ -1420,7 +2163,7 @@ function queueDuplexAudio(audio) {
 }
 
 function releaseDuplexAudioGate() {
-  if (state.duplexSubtitleReady) return;
+  if (state.duplexSubtitleReady || learnerDecisionPending()) return;
   state.duplexSubtitleReady = true;
   clearTimeout(state.duplexAudioGateTimer);
   state.duplexAudioGateTimer = null;
@@ -1430,7 +2173,20 @@ function releaseDuplexAudioGate() {
 
 function publishDuplexSubtitle() {
   const reply = state.duplexPendingSubtitle.trim();
-  if (!state.duplexValidatedText || !reply || !state.duplexSpeaking) return false;
+  if (learnerDecisionPending() || !state.duplexValidatedText || !reply) return false;
+  // Judge facts only after the current learner decision settles. Before
+  // that, an otherwise correct confirmation may merely be ahead of state.
+  if (state.expectedResponse?.kind === 'user' && state.selectedScene === 'coffee'
+    && Coffee.replyContradictsOrder(reply, state.coffee)) {
+    discardReasoningLeak(Coffee.promptFor(currentTask().id, state.coffee));
+    return false;
+  }
+  if (state.expectedResponse?.textOnlyDone) {
+    showUnplayedCharacterLine(reply, state.duplexResponseIsPrompt);
+    settleFailedDuplexTurn();
+    return true;
+  }
+  if (!state.duplexSpeaking) return false;
   state.duplexPendingSubtitle = '';
   if (state.pendingPostActionQuestion && state.actionDone && !state.speechDone && /\?\s*$/.test(reply)) {
     clearTimeout(state.postActionQuestionTimer);
@@ -1438,6 +2194,7 @@ function publishDuplexSubtitle() {
     state.pendingPostActionQuestion = false;
   }
   if (state.stage === 'active' && (state.duplexResponseIsPrompt || !state.characterPromptDelivered)) state.characterPromptDelivered = true;
+  globalThis.LumaExperience?.noteCharacterLine(reply);
   beginCharacterCaptionReveal(reply);
   releaseDuplexAudioGate();
   finishDuplexAudioOutput();
@@ -1448,8 +2205,17 @@ async function finishDuplexAudioOutput() {
   if (!state.duplexOutputDone || !state.duplexSubtitleReady || !state.duplexAcceptAudio) return;
   const generation = state.playbackGeneration;
   state.duplexAcceptAudio = false;
-  await state.duplexAudioQueue;
-  if (generation === state.playbackGeneration) finishDuplexTurnWhenAudioEnds();
+  // AudioContext.resume() can remain pending after a device/browser change.
+  // Keep a deadline while draining the queue, even after provider audio.done.
+  const timer = setTimeout(() => {
+    if (generation === state.playbackGeneration) settleFailedDuplexTurn();
+  }, 8000);
+  try {
+    await state.duplexAudioQueue;
+    if (generation === state.playbackGeneration) finishDuplexTurnWhenAudioEnds();
+  } catch {
+    if (generation === state.playbackGeneration) settleFailedDuplexTurn();
+  } finally { clearTimeout(timer); }
 }
 
 function extractDuplexText(event) {
@@ -1477,15 +2243,19 @@ function asksForCompletedAction(value) {
 
 function transitionReplyReplacement(value) {
   const tasks = currentSceneConfig().tasks;
-  return DialogueRules.transitionReplyReplacement({
+  const replacement = DialogueRules.transitionReplyReplacement({
     text: value,
     stage: state.stage,
     hasMoreTasks: tasks.some((task) => !state.coveredGoals.has(task.id)),
+    taskAcknowledgment: safeCharacterReply(),
   });
+  return replacement;
 }
 
 function safeCharacterReply() {
-  if (Breakfast.isTask(currentTask().id)) return state.actionDone ? Breakfast.acknowledgment(currentTask().id, state.breakfast) : currentTask().prompt;
+  if (Coffee.isTask(currentTask().id)) return state.speechDone ? Coffee.acknowledgment(currentTask().id, state.coffee) : currentTask().prompt;
+  if (Breakfast.isTask(currentTask().id)) return state.speechDone ? Breakfast.acknowledgment(currentTask().id, state.breakfast) : currentTask().prompt;
+  if (!taskNeedsAction() && !state.speechDone) return currentTask().prompt;
   if (state.actionDone && !state.speechDone) {
     const afterActionQuestions = {
       apple: 'Thank you. What is it?',
@@ -1563,8 +2333,10 @@ function connectDuplexSession() {
   if (state.duplexReady) return Promise.resolve(true);
   if (state.duplexConnectPromise) return state.duplexConnectPromise;
   const generation = ++state.connectionGeneration;
+  scene.dataset.voiceConnectionAttempts = String(Number(scene.dataset.voiceConnectionAttempts || 0) + 1);
   transcriptLedger.reset();
   clearLocalSpeechTurn();
+  state.deferredVoiceEvents = [];
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
   const socket = new WebSocket(`${scheme}://${location.host}/api/duplex`);
   state.duplexSocket = socket;
@@ -1575,11 +2347,20 @@ function connectDuplexSession() {
   const current = () => state.duplexSocket === socket && generation === state.connectionGeneration;
   const fail = (message) => {
     if (!current()) return;
+    scene.dataset.lastVoiceFailure = String(message || 'unknown');
+    scene.dataset.lastVoiceFailureAt = String(Date.now());
     clearTimeout(connectionWatchdog);
     state.duplexConnectReject?.(new Error(message));
     state.duplexConnectResolve = null; state.duplexConnectReject = null;
     state.duplexConnectPromise = null; state.duplexReady = false; state.duplexSocket = null;
     try { socket.close(); } catch {}
+    state.duplexFailureCount += 1;
+    if (state.duplexFailureCount >= 2) {
+      state.voiceConnectionPaused = true;
+      state.bufferOverflow = false;
+      microphoneBuffer.clear();
+      showToast('语音连接已暂停。网络恢复后，点麦克风重新连接。', 5200);
+    }
     settleFailedDuplexTurn(); syncVoiceStatus();
   };
   const connectionWatchdog = setTimeout(() => fail('connection_timeout'), 15000);
@@ -1587,7 +2368,7 @@ function connectDuplexSession() {
     if (!current()) return;
     sendDuplex({ type: 'start', taskId: currentTask().id, actionDone: state.actionDone,
       speechDone: state.speechDone, coveredGoals: [...state.coveredGoals], flowState: state.stage,
-      breakfast: state.breakfast, speechRate: preferences.speechRate, history: state.dialogueHistory.filter(m => m.final || m.speaker === 'luma').slice(-12).map(m => ({ role: m.speaker === 'user' ? 'user' : 'assistant', text: m.text })) });
+      breakfast: state.breakfast, coffee: state.coffee, speechRate: preferences.speechRate, history: state.dialogueHistory.filter(m => m.final || m.speaker === 'luma').slice(-12).map(m => ({ role: m.speaker === 'user' ? 'user' : 'assistant', text: m.text })) });
   };
   socket.onmessage = async (message) => {
     if (!current()) return;
@@ -1595,8 +2376,23 @@ function connectDuplexSession() {
     try { event = JSON.parse(message.data); } catch { return; }
     scene.dataset.lastDuplexEvent = event.type || 'unknown';
     scene.dataset.lastDuplexEventAt = String(Date.now());
+    // Audio already in flight can arrive after playback starts. Defer its
+    // recognition/response together; never cancel the line being heard.
+    const responseId = responseEventId(event);
+    const questionId = responseQuestionId(event);
+    const nextResponse = event.type.startsWith('response.output_')
+      && ((responseId && state.expectedResponse?.responseId && responseId !== state.expectedResponse.responseId)
+        || (questionId && state.expectedResponse?.questionId && questionId !== state.expectedResponse.questionId));
+    const knownTurn = transcriptLedger.items.get(transcriptItemId(event));
+    const learnerEvent = (event.type.startsWith('conversation.item.input_audio_transcription.')
+      && !knownTurn?.confirmed) || event.type === 'input_audio_buffer.speech_started';
+    if (microphoneWaitsForCharacter() && (learnerEvent || nextResponse)) {
+      state.deferredVoiceEvents.push({ data: message.data, context: captureUserTurnContext() });
+      return;
+    }
     if (event.type === 'session.created') {
       clearTimeout(connectionWatchdog); state.duplexReady = true;
+      state.duplexFailureCount = 0; state.voiceConnectionPaused = false;
       state.duplexConnectResolve?.(true);
       state.duplexConnectResolve = null; state.duplexConnectReject = null;
       state.duplexConnectPromise = null;
@@ -1616,17 +2412,18 @@ function connectDuplexSession() {
     }
     if (event.type === 'conversation.item.input_audio_transcription.delta'
       || event.type === 'conversation.item.input_audio_transcription.result') {
-      const turn = acceptTranscriptEvent(event);
+      const turn = acceptTranscriptEvent(event, { allowStart: true });
       const text = extractDuplexText(event);
       if (!turn || !VoiceRuntime.isSpeechText(text)) return;
       confirmLearnerTurn(turn, text);
       if (!turn.confirmed) return;
       updateLearnerTurn(turn, text);
-      if (state.activeVoiceTurn === turn) { state.duplexTranscript = text; armVoiceTurnWatchdog(); }
+      if (state.activeVoiceTurn === turn) state.duplexTranscript = text;
+      armVoiceTurnWatchdog(turn);
       return;
     }
     if (event.type === 'conversation.item.input_audio_transcription.completed') {
-      const turn = acceptTranscriptEvent(event);
+      const turn = acceptTranscriptEvent(event, { allowStart: true });
       if (turn) finalizeLearnerTranscript(extractDuplexText(event) || turn.text, { turn });
       return;
     }
@@ -1642,8 +2439,12 @@ function connectDuplexSession() {
     }
     if (event.type === 'response.output_text.done') {
       if (!acceptResponseEvent(event) || state.suppressDuplexResponse) return;
+      if (!resolveLearnerBeforeReply()) return;
       const reply = (extractDuplexText(event) || state.duplexResponseText).trim();
       state.duplexResponseText = '';
+      // A requested line already has an owner; late free replies cannot
+      // replace its text while that line's audio is being generated.
+      if (state.expectedResponse?.kind === 'say') { publishDuplexSubtitle(); return; }
       if (looksLikeReasoningLeak(reply)) { discardReasoningLeak(); return; }
       if (asksForCompletedAction(reply)) { discardReasoningLeak(safeCharacterReply()); return; }
       const replacement = transitionReplyReplacement(reply);
@@ -1653,6 +2454,7 @@ function connectDuplexSession() {
     }
     if (event.type === 'response.output_audio.started') {
       if (!acceptResponseEvent(event) || state.suppressDuplexResponse) return;
+      if (!resolveLearnerBeforeReply()) return;
       const expected = state.expectedResponse;
       expected.audioStarted = true;
       const turn = [...transcriptLedger.items.values()].find(item => item.id === expected.turnId);
@@ -1668,6 +2470,8 @@ function connectDuplexSession() {
       else { clearTimeout(state.duplexFinishTimer); state.duplexFinishTimer = null; }
       state.duplexSpeaking = true; setVoicePhase('character');
       state.lumaStartedAt = Date.now(); state.lastDuplexAudioAt = state.lumaStartedAt;
+      state.duplexClockTime = Number(state.duplexPlayerContext?.currentTime) || 0;
+      state.duplexClockAdvancedAt = state.lumaStartedAt;
       armCharacterTurnWatchdog();
       state.duplexOutputDone = false; state.duplexAcceptAudio = true;
       state.duplexPendingAudio = []; state.duplexSubtitleReady = false;
@@ -1685,8 +2489,20 @@ function connectDuplexSession() {
       else if (audio) state.duplexPendingAudio.push(audio);
       return;
     }
-    if (event.type === 'response.output_audio.done') {
-      if (!acceptResponseEvent(event) || !state.duplexAcceptAudio) return;
+    // Some upstream sessions finish with response.done but omit the more
+    // specific audio-done event. Treat either matching event as the terminal
+    // signal so the character turn cannot hold the lesson indefinitely.
+    if (event.type === 'response.output_audio.done' || event.type === 'response.done') {
+      if (!acceptResponseEvent(event)) return;
+      if (!state.expectedResponse?.audioStarted) {
+        if (learnerDecisionPending()) { state.expectedResponse.textOnlyDone = true; return; }
+        const text = state.duplexValidatedText ? state.duplexPendingSubtitle : '';
+        if (text) showUnplayedCharacterLine(text, state.duplexResponseIsPrompt);
+        settleFailedDuplexTurn();
+        return;
+      }
+      if (!state.duplexAcceptAudio) return;
+      if (state.duplexOutputDone) return;
       clearCharacterTurnWatchdog(); state.duplexOutputDone = true;
       if (!state.duplexSubtitleReady) {
         state.duplexAudioGateTimer = setTimeout(() => {
@@ -1695,11 +2511,19 @@ function connectDuplexSession() {
       } else finishDuplexAudioOutput();
       return;
     }
+    if (event.type === 'response.canceled' || event.type === 'response.cancelled') {
+      // An id-less acknowledgment of our previous cancellation cannot retire
+      // a new response. Only recover a cancellation bound to the current one.
+      const matchesCurrent = (responseId && responseId === state.expectedResponse?.responseId)
+        || (questionId && questionId === state.expectedResponse?.questionId);
+      if (matchesCurrent && acceptResponseEvent(event)) settleFailedDuplexTurn();
+      return;
+    }
     // Unidentified done/canceled events cannot retire a newer response.
     if (['error', 'local.error', 'local.closed'].includes(event.type)) fail(event.message || 'voice_unavailable');
   };
   socket.onerror = () => fail('socket_error');
-  socket.onclose = () => fail('socket_closed');
+  socket.onclose = event => fail(`socket_closed_${event?.code || 'unknown'}`);
   return promise;
 }
 
@@ -1718,7 +2542,7 @@ function updateDuplexTask({ force = false } = {}) {
     coveredGoals: [...state.coveredGoals],
     flowState: state.stage,
     speechRate: preferences.speechRate,
-    breakfast: state.breakfast,
+    breakfast: state.breakfast, coffee: state.coffee,
   });
 }
 
@@ -1733,7 +2557,7 @@ function flushDuplexTaskUpdate() {
     coveredGoals: [...state.coveredGoals],
     flowState: state.stage,
     speechRate: preferences.speechRate,
-    breakfast: state.breakfast,
+    breakfast: state.breakfast, coffee: state.coffee,
   });
 }
 
@@ -1741,6 +2565,7 @@ function closeDuplexSession() {
   const socket = state.duplexSocket;
   state.connectionGeneration += 1;
   state.duplexSocket = null; state.duplexReady = false;
+  state.deferredVoiceEvents = [];
   state.duplexConnectReject?.(new Error('session_closed'));
   state.duplexConnectReject = null; state.duplexConnectResolve = null; state.duplexConnectPromise = null;
   try { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'close' })); socket?.close(); } catch {}
@@ -1749,6 +2574,9 @@ function closeDuplexSession() {
 
 function stopSpeechPlayback() {
   state.speechRequestSerial += 1;
+  // Retiring a guarded reply also retires its suppression. A learner can
+  // answer during the short safe-retry delay; that new reply must be audible.
+  state.suppressDuplexResponse = false;
   clearReplyTimeout();
   stopDuplexPlayback();
   state.awaitingPrompt = false;
@@ -1760,24 +2588,86 @@ async function speak(text, { after, prompt = true } = {}) {
   const clean = String(text || '').trim();
   if (!clean) { after?.(); return false; }
   claimExclusiveVoiceSession(); unlockDuplexPlayback(); stopSpeechPlayback();
+  showPendingTaskPrompt(clean, { updatesQuestion: prompt });
   const requestId = ++state.speechRequestSerial, session = state.practiceSession;
   if (state.sceneStarted && state.stage === 'active') state.awaitingPrompt = Boolean(prompt);
   if (!state.duplexReady) { try { await connectDuplexSession(); } catch {} }
   if (requestId !== state.speechRequestSerial || session !== state.practiceSession) return false;
   if (!state.duplexReady) {
     state.awaitingPrompt = false; openLearnerTurn(); scheduleIdleNudge();
-    showToast('语音还没连上，可以先打字或稍后重听。'); after?.(); return false;
+    showUnplayedCharacterLine(clean, prompt);
+    showToast('语音还没连上，可以稍后重听或点麦克风重试。'); after?.(); return false;
   }
   state.duplexAfter = after || null; state.duplexResponseText = '';
   state.duplexPendingSubtitle = clean; state.duplexValidatedText = true;
   const expected = beginExpectedResponse('say');
+  expected.updatesQuestion = prompt;
   state.firstPacketTimer = setTimeout(() => {
     if (state.expectedResponse?.id !== expected.id || expected.audioStarted) return;
     settleFailedDuplexTurn();
+    showUnplayedCharacterLine(clean, prompt);
     showToast('这句话没有播放，可以点重听或继续说。');
   }, 10000);
   setVoicePhase('character'); sendDuplex({ type: 'say', text: clean });
   return true;
+}
+
+function showUnplayedCharacterLine(text, updatesQuestion = false) {
+  if (updatesQuestion) state.activeQuestion = text;
+  state.currentSpeech = text;
+  const pending = state.dialogueHistory.findLast(item => item.speaker === 'luma' && item.pendingPlayback && item.taskId === currentTask().id);
+  if (pending) { pending.text = text; delete pending.pendingPlayback; }
+  else if (state.dialogueHistory.at(-1)?.speaker !== 'luma' || latestCharacterText() !== text)
+    addDialogueMessage('luma', text, currentTask().speaker || 'Luma');
+  const message = [...state.dialogueHistory].reverse().find(item => item.speaker === 'luma');
+  if (message) { message.status = '语音未播放 · 可以看字幕或重听'; renderDialogue(); }
+  if (state.stage === 'active' && currentTask().autoAdvance) completeMultimodalTask();
+}
+
+function handleConversationSupport(text, context, message, { responseStarted = false } = {}) {
+  const intent = DialogueRules.supportIntent(text);
+  if (!intent || context.practiceSession !== state.practiceSession
+    || context.sceneId !== state.selectedScene || context.taskId !== currentTask().id || state.stage !== 'active') return false;
+  if (['meaning', 'example'].includes(intent) && !isCurrentTaskQuestion(context.question)) {
+    // A natural side question needs its own explanation from the conversation,
+    // not a canned translation of the original lesson question.
+    globalThis.LumaExperience?.noteHelp(intent === 'example' ? 3 : 1, intent);
+    return false;
+  }
+  if (responseStarted && isConversationPlaybackActive()) {
+    // Final ASR may arrive after this turn's answer has begun. Keep that full
+    // sentence, and classify the request as support rather than task success.
+    globalThis.LumaExperience?.noteHelp(intent === 'example' ? 3 : 1, intent);
+    message.status = '继续当前对话'; renderDialogue();
+    if (intent === 'wait') { clearIdleNudge(); state.idleNudgeCount = 2; }
+    return true;
+  }
+  stopSpeechPlayback(); clearLocalSpeechTurn(); clearIdleNudge();
+  state.idleNudgeCount = intent === 'wait' ? 2 : 0;
+  message.status = intent === 'wait' ? '慢慢想，准备好直接开口' : '继续当前对话';
+  renderDialogue();
+  globalThis.LumaExperience?.closeHelp();
+  if (intent === 'wait') {
+    showToast('好，慢慢想。准备好后直接回答，或说“继续”。', 8000);
+    openLearnerTurn(); return true;
+  }
+  const question = context.question || currentTask().prompt;
+  state.activeQuestion = question;
+  if (intent === 'continue' || intent === 'replay') {
+    if (intent === 'replay') globalThis.LumaExperience?.noteHelp(1, 'replay');
+    speak(question); return true;
+  }
+  const support = speechSupportForTask();
+  globalThis.LumaExperience?.noteHelp(intent === 'meaning' ? 1 : 3, intent);
+  const line = intent === 'meaning' ? support.meaning : `${support.meaning} 可以说：${support.model}`;
+  speak(line, { prompt: false });
+  return true;
+}
+
+function isCurrentTaskQuestion(question) {
+  const task = currentTask(), normalized = normalizedSpeech(question);
+  return normalized === normalizedSpeech(task.prompt)
+    || Boolean(task.question && normalized === normalizedSpeech(task.question));
 }
 
 function emphasizeCurrentAction() {
@@ -1794,7 +2684,7 @@ function characterHintLine(level = 1) {
     if (level === 1) return currentTask().prompt;
     const explanations = {
       'breakfast-drink': '你想喝牛奶还是水？可以说 Milk，或者 Water。',
-      'breakfast-cup': '请给我一个杯子。把杯子拖到我手边就可以。',
+      'breakfast-cup': '我在请你把杯子给我。你可以说 Here，或者 Here you are。',
       'breakfast-more': '你还想再喝一点吗？想要就说 Yes，够了就说 No。',
     };
     return explanations[currentTask().id];
@@ -1867,6 +2757,7 @@ function syncSubtitleVisibility({ announce = false } = {}) {
   subtitleToggle.setAttribute('aria-label', hidden ? '显示字幕' : '隐藏字幕');
   subtitleToggle.title = hidden ? '显示字幕' : '隐藏字幕';
   subtitleToggle.innerHTML = `<i class="ph ${hidden ? 'ph-eye' : 'ph-closed-captioning'}" aria-hidden="true"></i>`;
+  if (announce && !hidden) globalThis.LumaVisuals?.noteExposure();
   if (announce) showToast(hidden ? '字幕已隐藏 · 现在只听声音' : '字幕已显示 · 可以对照声音理解');
 }
 
@@ -1881,17 +2772,29 @@ function syncActionCoach() {
 }
 
 function speechSupportForTask(task = currentTask()) {
+  if (state.selectedScene === 'coffee' && state.coffeeMissionId === 'C03' && task.id === 'coffee-size') return {
+    meaning: '你点的是小杯，但 Mia 给成了大杯。告诉她你原本点的是小杯。',
+    starter: 'Sorry, small…',
+    model: 'Sorry, I ordered a small. 或者 This should be small.',
+  };
   const supports = {
+    'coffee-order': { meaning: '店员在问你想喝什么。左边是拿铁，右边是美式。', starter: 'A latte…', model: 'A latte, please. 或者 An americano, please.' },
+    'coffee-size': { meaning: '店员在问你要小杯还是大杯。', starter: 'Small…', model: 'Small, please. 或者 Large, please.' },
+    'coffee-service': { meaning: '店员在问你在店里喝，还是带走。', starter: 'To go…', model: 'To go, please. 或者 For here, please.' },
+    'coffee-thanks': { meaning: '店员已经做好了你点的咖啡，回应一句谢谢就好。', starter: 'Thank…', model: 'Thank you.' },
+    'breakfast-drink': { meaning: '她在问你想喝牛奶还是水。', starter: 'Milk…', model: 'Milk, please. 或者 Water, please.' },
+    'breakfast-cup': { meaning: '她想请你把杯子给她，开口回应就可以。', starter: 'Here…', model: 'Here you are.' },
+    'breakfast-more': { meaning: '她在问你还要不要再来一点。', starter: 'Yes…', model: 'Yes, please. 够了可以说 No, thanks.' },
     apple: { meaning: '这是苹果。', starter: 'An…', model: 'An apple.' },
     milk: { meaning: '这是牛奶。', starter: 'M…', model: 'Milk.' },
     plate: { meaning: '这是盘子。', starter: 'A…', model: 'A plate.' },
     cup: { meaning: '这是杯子。', starter: 'A…', model: 'A cup.' },
     spoon: { meaning: '这是勺子。', starter: 'A…', model: 'A spoon.' },
-    ticket: { meaning: '给你。', starter: 'Here…', model: 'Here you are.' },
+    ticket: { meaning: '工作人员想看看你的登机牌，开口回应就可以。', starter: 'Here…', model: 'Here you are.' },
     bag: { meaning: '这是你的包吗？', starter: 'Yes…', model: 'Yes.' },
-    'gate-a12': { meaning: '指出登机口。', starter: 'A…', model: 'A12.' },
+    'gate-a12': { meaning: '工作人员在问你要去哪个登机口。你的登机口是 A12。', starter: 'A…', model: 'A12.' },
     'office-purpose': { meaning: '说出你想见的人。', starter: 'M…', model: 'Maya.' },
-    'office-signin': { meaning: '签好了。', starter: 'I…', model: 'I signed in.' },
+    'office-signin': { meaning: '告诉前台你的名字。', starter: 'My…', model: 'My name is Li.' },
     'office-greeting': { meaning: '打个招呼就好。', starter: 'Hi…', model: 'Hi, Maya.' },
   };
   return supports[task.id] || { meaning: '说一个词也可以。', starter: 'Yes…', model: 'Yes.' };
@@ -1905,19 +2808,8 @@ function showAppToast(message, duration = 2400) {
 }
 
 function syncHomeProgressState() {
-  const progress = document.querySelector('.daily-progress');
-  const kitchenSessions = learningProfile.sessions.filter((session) => session.scene === 'kitchen');
-  const guidedDone = state.completed || kitchenSessions.some((session) => session.mode === 'guided');
-  const listeningDone = kitchenSessions.some((session) => session.mode === 'listening');
-  const progressValue = listeningDone ? 100 : guidedDone ? 60 : 20;
-  progress.querySelector('span').style.width = `${progressValue}%`;
-  progress.setAttribute('aria-label', listeningDone ? '今天的字幕学习和无字幕复练已完成' : guidedDone ? '字幕学习已完成，下一步是无字幕复练' : '今天的字幕学习尚未完成');
-  liveLabel.innerHTML = listeningDone
-    ? '<i class="ph-fill ph-check-circle" aria-hidden="true"></i> 今日闭环完成'
-    : guidedDone
-      ? '<i class="ph-fill ph-ear" aria-hidden="true"></i> 下一步 · 只听声音'
-      : '<i class="ph-fill ph-sparkle" aria-hidden="true"></i> 第一步 · 看字幕学习';
-  primaryCta.innerHTML = `${listeningDone ? '再练一次' : guidedDone ? '无字幕再练' : '开始学习'} <i class="ph ph-arrow-right" aria-hidden="true"></i>`;
+  syncOuterQuestUi();
+  globalThis.LumaExperience?.renderHome();
 }
 
 function syncSettingsUi() {
@@ -1928,7 +2820,7 @@ function syncSettingsUi() {
 function handleSetting(button) {
   if (button.dataset.setting === 'speech-rate') {
     preferences.speechRate = preferences.speechRate === '慢速' ? '正常' : '慢速';
-    localStorage.setItem('luma-speech-rate', preferences.speechRate);
+    try { localStorage.setItem('luma-speech-rate', preferences.speechRate); } catch {}
     updateDuplexTask({ force: true });
     syncSettingsUi();
     showAppToast(`语音速度已切换为${preferences.speechRate}`);
@@ -1936,7 +2828,7 @@ function handleSetting(button) {
   }
   if (button.dataset.setting === 'rescue') {
     preferences.rescue = preferences.rescue === '按需显示' ? '始终显示' : '按需显示';
-    localStorage.setItem('luma-rescue', preferences.rescue);
+    try { localStorage.setItem('luma-rescue', preferences.rescue); } catch {}
     scene.classList.toggle('show-translation', preferences.rescue === '始终显示');
     syncSettingsUi();
     showAppToast(`中文救援层：${preferences.rescue}`);
@@ -1950,11 +2842,37 @@ function scheduleTaskPrompt(taskId, initialDelay) {
   const session = state.practiceSession;
   const deliver = () => {
     if (session !== state.practiceSession || state.stage !== 'active' || currentTask().id !== taskId || !state.awaitingPrompt) return;
-    if (scheduledCharacterLineBlocked()) { state.promptTimer = setTimeout(deliver, 180); return; }
+    // An unconfirmed turn may only reserve PCM captured before this opening.
+    // It must not prevent the line whose completion will release that PCM.
+    // Confirmed speech and responses still retain their conversational floor.
+    const blocked = state.awaitingModelReply || state.userTurnActive
+      || state.localSpeechActive || state.userTranscriptPending
+      || Boolean(state.activeVoiceTurn?.confirmed) || Boolean(state.expectedResponse)
+      || state.duplexSpeaking || state.duplexAcceptAudio || isConversationPlaybackActive();
+    if (blocked) { state.promptTimer = setTimeout(deliver, 180); return; }
     state.promptTimer = null;
     speak(currentTask().prompt);
   };
   state.promptTimer = setTimeout(deliver, initialDelay);
+}
+
+function showPendingTaskPrompt(line = currentTask().prompt, { updatesQuestion = true } = {}) {
+  const task = currentTask();
+  const text = String(line || '').trim();
+  globalThis.LumaVisuals?.speech(text);
+  if (!text) return;
+  let message = state.dialogueHistory.find(item => item.pendingPlayback && item.taskId === task.id);
+  if (!message) {
+    const index = addDialogueMessage('luma', text, task.speaker || 'Luma');
+    message = state.dialogueHistory[index];
+  }
+  message.text = text;
+  message.pendingPlayback = true;
+  message.updatesQuestion = updatesQuestion;
+  message.taskId = task.id;
+  message.status = '正在准备声音 · 可以先读这一句';
+  if (updatesQuestion) state.activeQuestion = text;
+  renderDialogue();
 }
 
 function startTask(index, { speakAgain = true } = {}) {
@@ -1974,11 +2892,14 @@ function startTask(index, { speakAgain = true } = {}) {
   state.taskIndex = index;
   state.breakfastHelp = false; state.breakfastCupSelected = false;
   const task = currentTask();
+  const hasTransitionUtterance = state.pendingTransitionUtterance?.practiceSession === state.practiceSession
+    && state.pendingTransitionUtterance.taskIndex === index
+    && state.pendingTransitionUtterance.taskId === task.id;
   state.stage = 'active';
   state.hintLevel = 0;
   state.dragging = false;
-  state.actionDone = !taskHasAction(task);
-  state.speechDone = !taskNeedsSpeech(task);
+  state.actionDone = !taskHasAction(task) || Boolean(state.sessionGoals[task.id]?.acted);
+  state.speechDone = !taskNeedsSpeech(task) || Boolean(state.sessionGoals[task.id]?.meaningAccepted);
   state.lastTranscript = '';
   state.lastVoiceEnergyAt = 0;
   state.lastBargeInEnergyAt = 0;
@@ -2028,6 +2949,7 @@ function startTask(index, { speakAgain = true } = {}) {
   currentGoalRecord();
   syncSceneProgress();
   renderBreakfast();
+  globalThis.LumaVisuals?.render();
   setApplePosition(state.initialApple, true);
   state.currentSpeech = '';
   state.activeQuestion = '';
@@ -2038,20 +2960,67 @@ function startTask(index, { speakAgain = true } = {}) {
   state.awaitingPrompt = false;
   if (state.duplexReady) updateDuplexTask({ force: true });
   else connectDuplexSession().catch(() => {});
-  state.awaitingPrompt = Boolean(speakAgain);
+  state.awaitingPrompt = Boolean(speakAgain && !hasTransitionUtterance);
   if (speakAgain) {
-    scheduleTaskPrompt(task.id, state.duplexReady ? 180 : 2600);
+    showPendingTaskPrompt();
+    if (hasTransitionUtterance) {
+      const promptMessage = state.dialogueHistory.findLast(item => item.pendingPlayback && item.taskId === task.id);
+      if (promptMessage) {
+        delete promptMessage.pendingPlayback;
+        promptMessage.status = '已听到你刚才的回答 · 正在接上';
+        renderDialogue();
+      }
+      state.promptTimer = setTimeout(() => {
+        state.promptTimer = null;
+        consumeTransitionUtterance();
+      }, 180);
+    } else scheduleTaskPrompt(task.id, state.duplexReady ? 180 : 2600);
   }
+  globalThis.LumaExperience?.taskStarted();
   ensureSceneVoiceIsOpen();
 }
 
-function resetScene({ speakAgain = true } = {}) {
+function resetScene({ speakAgain = true, resumeCheckpoint = null, startTaskIndex = 0, reviewTaskId = null } = {}) {
+  const restartCoffeeMission = state.selectedScene === 'coffee' && resumeCheckpoint?.sceneId === 'coffee';
   state.practiceSession += 1;
+  state.pendingTransitionUtterance = null;
   state.pendingFeedback.forEach(controller => controller.abort());
   state.pendingFeedback.clear();
   transcriptLedger.reset();
   microphoneBuffer.clear();
   state.breakfast = Breakfast.initial();
+  if (state.selectedScene === 'coffee' && resumeCheckpoint?.sceneId === 'coffee') {
+    const resumedMission = resumeCheckpoint.missionId || resumeCheckpoint.coffee?.missionId;
+    if (COFFEE_MISSION_UI[resumedMission]) state.coffeeMissionId = resumedMission;
+    state.coffeeVariantId = resumeCheckpoint.variantId || resumeCheckpoint.coffee?.variantId || null;
+  }
+  if (state.selectedScene === 'coffee' && !state.coffeeVariantId && state.coffeeMissionId === 'C04') {
+    const variants = coffeeMissionMeta('C04').variants || [];
+    state.coffeeVariantId = variants.length ? variants[coffeeMissionProgress.runs % variants.length].id : null;
+  }
+  state.coffee = state.selectedScene === 'coffee' && typeof Coffee.missionInitial === 'function'
+    ? Coffee.missionInitial(state.coffeeMissionId, state.coffeeVariantId)
+    : Coffee.initial();
+  if (state.selectedScene === 'coffee' && !resumeCheckpoint && reviewTaskId) {
+    const tasks = currentSceneConfig().tasks;
+    const reviewIndex = tasks.findIndex(task => task.id === reviewTaskId);
+    const target = state.coffee?.target || {};
+    const reviewSetup = {
+      'coffee-order': target.drink || 'latte',
+      'coffee-size': target.size || 'small',
+      'coffee-service': target.service || 'to-go',
+    };
+    for (const task of tasks.slice(0, Math.max(0, reviewIndex))) {
+      const answer = reviewSetup[task.id];
+      if (!answer) continue;
+      const result = Coffee.advanceMission(state.coffee, answer);
+      if (result?.world) state.coffee = result.world;
+    }
+  }
+  if (state.selectedScene === 'coffee') {
+    state.coffeeVariantId = state.coffee?.variantId || state.coffeeVariantId;
+    state.coffeeMissionAttempt += 1;
+  }
   closeDuplexSession();
   state.dialogueHistory = [];
   state.coveredGoals = new Set();
@@ -2064,14 +3033,44 @@ function resetScene({ speakAgain = true } = {}) {
   state.streamingUserIndex = null;
   state.pendingUserIndex = null;
   state.ignoredTranscriptItems = new Set();
+  if (resumeCheckpoint?.sceneId === state.selectedScene && !restartCoffeeMission) {
+    state.breakfast = resumeCheckpoint.breakfast || Breakfast.initial();
+    state.coffee = state.selectedScene === 'coffee' && typeof Coffee.normalizeMissionWorld === 'function'
+      ? (Coffee.normalizeMissionWorld(resumeCheckpoint.coffee) || state.coffee)
+      : Coffee.normalizeWorld(resumeCheckpoint.coffee);
+    state.coffeeMissionId = state.coffee?.missionId || state.coffeeMissionId;
+    state.coffeeVariantId = state.coffee?.variantId || state.coffeeVariantId;
+    state.coveredGoals = new Set(resumeCheckpoint.coveredGoals || []);
+    state.sessionGoals = resumeCheckpoint.goalRecords || {};
+  }
+  const reviewIndex = reviewTaskId
+    ? currentSceneConfig().tasks.findIndex(task => task.id === reviewTaskId)
+    : -1;
+  const requestedTaskIndex = (restartCoffeeMission ? 0 : resumeCheckpoint?.taskIndex)
+    ?? (reviewIndex >= 0 ? reviewIndex : startTaskIndex);
+  state.taskIndex = Math.min(currentSceneConfig().tasks.length - 1, Math.max(0, requestedTaskIndex || 0));
+  if (restartCoffeeMission) globalThis.LumaExperience?.store?.discardCheckpoint?.({ sessionId: resumeCheckpoint.sessionId });
+  globalThis.LumaExperience?.begin(restartCoffeeMission ? null : resumeCheckpoint);
   closeDialogueHistoryPanel();
   renderDialogue();
-  startTask(0, { speakAgain });
+  startTask(state.taskIndex, { speakAgain });
 }
 
-function startScene({ subtitlesHidden = false, skipIntro = false } = {}) {
-  if (!skipIntro && localStorage.getItem('luma-intro-v1') !== 'seen') {
-    showSceneIntroduction({ subtitlesHidden }); return;
+function startScene({ subtitlesHidden = false, skipIntro = false, resumeCheckpoint = null,
+  startTaskIndex = 0, reviewTaskId = null, reviewTargetIds = [], reviewItems = [],
+  missionId = null, variantId = null } = {}) {
+  if (state.selectedScene === 'coffee' && missionId && COFFEE_MISSION_UI[missionId]) {
+    selectCoffeeMission(missionId);
+    if (variantId) state.coffeeVariantId = variantId;
+  }
+  scene.dataset.reviewTaskId = reviewTaskId || '';
+  scene.dataset.reviewTargetIds = reviewTargetIds.join(',');
+  scene.dataset.reviewItemCount = String(reviewItems.length);
+  let introSeen = false;
+  try { introSeen = localStorage.getItem('luma-intro-v1') === 'seen'; } catch {}
+  if (!skipIntro && (!introSeen || state.selectedScene === 'coffee')) {
+    showSceneIntroduction({ subtitlesHidden, resumeCheckpoint, startTaskIndex, reviewTaskId,
+      reviewTargetIds, reviewItems, missionId, variantId }); return;
   }
   hideSceneIntroduction();
   claimExclusiveVoiceSession();
@@ -2102,20 +3101,21 @@ function startScene({ subtitlesHidden = false, skipIntro = false } = {}) {
   createDust();
   requestAnimationFrame(() => {
     updateSceneGeometry();
-    resetScene({ speakAgain: true });
+    resetScene({ speakAgain: true, resumeCheckpoint, startTaskIndex, reviewTaskId });
     if (state.subtitlesHidden) showToast('无字幕练习 · 先听声音，需要时可打开字幕', 3200);
   });
 }
 
 function leaveScene({ keepVoice = false } = {}) {
+  globalThis.LumaExperience?.checkpoint();
+  globalThis.LumaExperience?.closeHelp();
   hideSceneIntroduction();
   breakfastWorld.hidden = true; breakfastPanel.hidden = true;
+  globalThis.LumaVisuals?.clear();
   delete scene.dataset.breakfast;
   state.practiceSession += 1;
   state.pendingFeedback.forEach(controller => controller.abort());
   state.pendingFeedback.clear();
-  textAnswerForm.hidden = true;
-  scene.classList.remove('is-typing');
   stopVoiceHealthMonitor();
   clearIdleNudge();
   clearReviewTransition();
@@ -2125,6 +3125,7 @@ function leaveScene({ keepVoice = false } = {}) {
   clearTimeout(state.postActionQuestionTimer);
   state.postActionQuestionTimer = null;
   state.pendingPostActionQuestion = false;
+  state.pendingTransitionUtterance = null;
   clearLocalSpeechTurn();
   stopSpeechPlayback();
   cancelSpeechCapture();
@@ -2139,6 +3140,7 @@ function leaveScene({ keepVoice = false } = {}) {
   state.dragging = false;
   actionCoach.hidden = true;
   scene.classList.remove('is-dragging', 'near-target', 'is-listening');
+  syncHomeProgressState();
   syncA11yState();
 }
 
@@ -2236,6 +3238,7 @@ function completeCurrentTaskAction() {
   }
   if (task.question && !state.speechDone) state.pendingPostActionQuestion = true;
   currentGoalRecord().acted = true;
+  globalThis.LumaExperience?.noteAction('tap');
   syncActionCoach();
   syncSceneProgress();
   updateDuplexTask({ force: true });
@@ -2337,35 +3340,11 @@ function showReview() {
     if (reviewScreen.classList.contains('is-active')) playCompletionCelebration();
   }, 340);
   document.querySelector('.review-scroll').scrollTop = 0;
+  markCoffeeMissionCompleted();
   saveLearningSession();
   syncHomeProgressState();
-  const data = SCENES[state.selectedScene];
-  const count = currentSceneConfig().tasks.length;
-  const goals = Object.values(state.sessionGoals);
-  const heardCount = goals.filter((goal) => goal.heard).length;
-  const actionCount = goals.filter((goal) => goal.acted).length;
-  const hintCount = goals.reduce((sum, goal) => sum + goal.hints, 0);
-  document.querySelector('#reviewSceneMeta').textContent = `${data.title} · ${state.practiceMode === 'listening' ? '无字幕复练' : '字幕学习'} · ${count} 个目标`;
-  document.querySelector('#reviewHeard').textContent = `${heardCount} 条${state.practiceMode === 'listening' ? '无字幕理解' : '真实请求'}`;
-  document.querySelector('#reviewActions').textContent = `完成 ${actionCount} 个有效动作`;
-  document.querySelector('#reviewSpoken').textContent = `${goals.filter((goal) => goal.spoke).length} 次有效回应 · ${hintCount} 次提示`;
-  const didSpeak = goals.some(goal => goal.spoke);
-  const original = didSpeak ? representativeLearnerUtterance() : '你用动作完成了这次合作。下次可以试着说一个词。';
-  const corrected = DialogueRules.gentleRecast(original);
-  document.querySelector('#reviewOriginal').textContent = original;
-  document.querySelector('#reviewCorrected').textContent = corrected;
-  document.querySelector('#reviewRecastArrow').hidden = !corrected;
-  document.querySelector('#reviewRecastLabel').hidden = !corrected;
-  document.querySelector('#playRecast').hidden = !corrected;
-  document.querySelector('#reviewTransferTitle').textContent = state.selectedScene === 'airport'
-    ? 'ticket 会在酒店入住时再次出现'
-    : state.selectedScene === 'office'
-      ? 'I’m here to see 会在前台办事时再次出现'
-      : 'give me 会在机场服务中再次出现';
-  document.querySelector('#reviewTransferCopy').textContent = '下一次会换一个真实情境，不会重复背同一个答案。';
-  repeatSceneButton.innerHTML = state.practiceMode === 'guided'
-    ? '<i class="ph ph-eye-slash"></i> 关闭字幕再练一次'
-    : '<i class="ph ph-arrows-split"></i> 换个场景继续';
+  globalThis.LumaExperience?.renderReview();
+  renderCoffeeMissionResult();
 }
 
 function clearReviewTransition() {
@@ -2396,7 +3375,7 @@ function scheduleTaskAdvance(nextTaskIndex) {
       quietSince = Date.now();
       setMode(`${currentTask().speaker || 'Luma'} 听懂了 · 稍后继续`, 'is-complete');
     }
-    const dwell = DialogueRules.transitionDwell(latestCharacterText(), {
+    const dwell = DialogueRules.transitionDwell(latestFollowupText(), {
       normal: TASK_ADVANCE_DWELL_MS,
       afterQuestion: 12000,
     });
@@ -2430,7 +3409,7 @@ function scheduleReview() {
       quietSince = Date.now();
       setMode(`${currentTask().speaker || 'Luma'} 听懂了 · 这一段完成了`, 'is-complete');
     }
-    const dwell = DialogueRules.transitionDwell(latestCharacterText(), {
+    const dwell = DialogueRules.transitionDwell(latestFollowupText(), {
       normal: FINAL_REVIEW_DWELL_MS,
       afterQuestion: 12000,
     });
@@ -2446,27 +3425,11 @@ function scheduleReview() {
   waitForStableQuiet();
 }
 
-async function finishSpeakingAnswer(transcript) {
-  const clean = String(transcript || '').trim();
-  if (!clean || !state.sceneStarted) return false;
-  if (!state.duplexReady) {
-    showToast('正在连接，文字还在输入框里，请稍后发送。');
-    connectDuplexSession().catch(() => {}); return false;
-  }
-  stopSpeechPlayback();
-  const context = captureUserTurnContext();
-  const index = addDialogueMessage('user', clean), message = state.dialogueHistory[index];
-  message.final = true;
-  beginExpectedResponse('text');
-  state.awaitingModelReply = true;
-  armReplyTimeout();
-  sendDuplex({ type: 'user.text', text: clean });
-  requestLanguageFeedback(context.question, clean, { ...context, messageId: message.id, revision: message.revision, final: true });
-  return true;
-}
-
 function completeMultimodalTask({ waitForDuplexReply = false } = {}) {
   if (!taskRequirementsMet() || ['task-complete', 'complete'].includes(state.stage)) return false;
+  // Local task evidence owns progress in every scene. An unbounded free-form
+  // provider reply must not hold a confirmed answer on the previous step.
+  if (!waitForDuplexReply) stopSpeechPlayback();
   const task = currentTask();
   const tasks = currentSceneConfig().tasks;
   const taskCount = tasks.length;
@@ -2474,8 +3437,15 @@ function completeMultimodalTask({ waitForDuplexReply = false } = {}) {
   const nextTaskIndex = tasks.findIndex((candidate, index) => index > state.taskIndex && !state.coveredGoals.has(candidate.id));
   const isSceneComplete = nextTaskIndex === -1;
   const completedCount = tasks.filter((candidate) => state.coveredGoals.has(candidate.id)).length;
-  const conversationBusy = waitForDuplexReply || isConversationTurnPending();
   state.stage = isSceneComplete ? 'complete' : 'task-complete';
+  if (!waitForDuplexReply) {
+    flushDeferredVoiceEvents();
+    if (!state.duplexSocket) state.deferredVoiceEvents = [];
+    flushMicrophoneBuffer();
+  }
+  const conversationBusy = waitForDuplexReply || isConversationTurnPending();
+  if (isSceneComplete) saveLearningSession();
+  else globalThis.LumaExperience?.checkpoint(nextTaskIndex);
   setTurnPhase(isSceneComplete ? TURN_PHASE.COMPLETE : TURN_PHASE.TRANSITIONING);
   state.pendingTaskUpdate = false;
   micLabel.textContent = state.handsFreeListening ? '随时说' : '完成';
@@ -2491,7 +3461,7 @@ function completeMultimodalTask({ waitForDuplexReply = false } = {}) {
     ? scheduleReview
     : () => scheduleTaskAdvance(nextTaskIndex);
   if (isSceneComplete) {
-    localStorage.setItem('luma-demo-v6-complete', new Date().toISOString());
+    try { localStorage.setItem('luma-demo-v6-complete', new Date().toISOString()); } catch {}
     state.completed = true;
   }
   // The flow scheduler is the only owner of task advancement. Character
@@ -2540,16 +3510,40 @@ function cancelSpeechCapture() {
   state.handsFreeListening = false; state.micStarting = false;
   disconnectAudioCapture(); releaseMicrophoneStream();
   microphoneBuffer.clear(); state.bufferOverflow = false;
+  state.deferredVoiceEvents = [];
   setVoicePhase('idle'); cleanupSpeechCaptureUi();
 }
 
+function microphoneWaitsForCharacter() {
+  return state.awaitingPrompt || state.duplexSpeaking || state.duplexAcceptAudio || isConversationPlaybackActive();
+}
+
+function flushDeferredVoiceEvents() {
+  const socket = state.duplexSocket;
+  if (!socket || microphoneWaitsForCharacter()) return;
+  const events = state.deferredVoiceEvents.splice(0);
+  for (const event of events) {
+    state.pendingServerTurnContext = event.context;
+    socket.onmessage({ data: event.data });
+    if (state.pendingServerTurnContext === event.context) state.pendingServerTurnContext = null;
+  }
+}
+
 function flushMicrophoneBuffer() {
+  scene.dataset.micBufferedMs = String(Math.round(microphoneBuffer.bytes / 32));
+  // Non-interrupting conversations: capture continuously, but give the voice
+  // service the buffered PCM only after the current audible line finishes.
+  // This delays overlapping speech's transcript by the remaining line length.
+  if (microphoneWaitsForCharacter()) return;
+  flushDeferredVoiceEvents();
+  if (microphoneWaitsForCharacter()) return;
   const socket = state.duplexSocket;
   if (!state.duplexReady || socket?.readyState !== WebSocket.OPEN || socket.bufferedAmount > 64000) return;
   for (const pcm of microphoneBuffer.take()) {
     socket.send(pcm.buffer);
     scene.dataset.micPackets = String(Number(scene.dataset.micPackets || 0) + 1);
   }
+  scene.dataset.micBufferedMs = '0';
   if (state.bufferOverflow) {
     state.bufferOverflow = false;
     syncVoiceStatus();
@@ -2581,19 +3575,26 @@ async function getMicrophoneStream(generation = state.captureGeneration) {
 async function startHandsFreeListening() {
   if (!state.sceneStarted || state.handsFreeListening || state.micStarting) return;
   if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext) {
-    state.micMuted = true; syncVoiceStatus();
-    showToast('当前浏览器无法收音，可以点“打字”继续。'); return;
+    state.micMuted = true; state.micFailure = 'unavailable'; syncVoiceStatus();
+    showToast('当前浏览器无法收音，请检查麦克风权限或换用支持的浏览器。', 4200); return;
   }
   claimExclusiveVoiceSession();
   const generation = ++state.captureGeneration;
   const valid = () => generation === state.captureGeneration && state.sceneStarted && !state.micMuted;
-  state.micStarting = true; state.micMuted = false;
+  state.micStarting = true; state.micMuted = false; state.micFailure = null;
+  state.voiceConnectionPaused = false; state.duplexFailureCount = 0;
+  delete scene.dataset.micErrorName;
+  delete scene.dataset.micErrorMessage;
+  delete scene.dataset.micFailurePhase;
+  let microphoneSetupPhase = 'voice-connection';
   micButton.disabled = true; syncVoiceStatus();
   try {
     connectDuplexSession().catch(() => {});
+    microphoneSetupPhase = 'device-request';
     const stream = await getMicrophoneStream(generation);
     if (!stream || !valid()) return;
     disconnectAudioCapture();
+    microphoneSetupPhase = 'audio-context';
     state.audioContext ||= new AudioContext();
     const context = state.audioContext;
     await context.resume();
@@ -2611,19 +3612,23 @@ async function startHandsFreeListening() {
       const rms = Math.sqrt(sum / Math.max(1, input.length));
       scene.dataset.micRms = rms.toFixed(4);
       scene.dataset.micFrames = String(Number(scene.dataset.micFrames || 0) + 1);
-      // Native echo cancellation/noise suppression clean audio. Volume is
-      // telemetry only; a door, keyboard or fan must never cancel the character.
-      if (rms > .008) state.lastVoiceEnergyAt = Date.now();
+      // Energy can reserve the original question for queued input, but never
+      // confirms words, scores an answer, or interrupts the character.
+      if (rms > .008) {
+        state.lastVoiceEnergyAt = Date.now();
+        if (microphoneWaitsForCharacter()) beginLocalSpeechTurn();
+      }
       const pcm = resampler.push(input);
       if (!pcm.length) return;
       if (state.bufferOverflow) { flushMicrophoneBuffer(); return; }
       if (!microphoneBuffer.push(pcm)) {
         state.bufferOverflow = true;
-        showToast('连接中断太久，这段声音未发完。请等连接恢复后重说，或打字。', 4500);
+        showToast('连接中断太久，这段声音未发完。请等连接恢复后再说一次。', 4500);
         syncVoiceStatus(); return;
       }
       flushMicrophoneBuffer();
     };
+    microphoneSetupPhase = 'audio-graph';
     state.audioSource = context.createMediaStreamSource(stream);
     state.audioFilter = context.createBiquadFilter();
     state.audioFilter.type = 'highpass'; state.audioFilter.frequency.value = 75; state.audioFilter.Q.value = .7;
@@ -2647,16 +3652,23 @@ async function startHandsFreeListening() {
     };
     // Temporary OS mute is handled by the health monitor; do not stop a live
     // track during a brief interruption from Safari or a phone notification.
+    microphoneSetupPhase = 'ui-ready';
     micButton.classList.add('is-live'); micButton.classList.remove('is-muted', 'is-held');
     micButton.setAttribute('aria-pressed', 'true'); micButton.setAttribute('aria-label', '关闭麦克风');
     openLearnerTurn(); syncVoiceStatus();
   } catch (error) {
     if (!valid()) return;
+    scene.dataset.micErrorName = String(error?.name || 'Error');
+    scene.dataset.micErrorMessage = String(error?.message || '').slice(0, 250);
+    scene.dataset.micFailurePhase = microphoneSetupPhase;
     state.handsFreeListening = false; state.micMuted = true;
+    state.micFailure = error?.name === 'NotAllowedError' ? 'permission' : 'unavailable';
     disconnectAudioCapture(); releaseMicrophoneStream();
     micButton.classList.remove('is-live'); micButton.classList.add('is-muted');
     micButton.setAttribute('aria-pressed', 'false'); micButton.setAttribute('aria-label', '重试麦克风');
-    showToast(error?.name === 'NotAllowedError' ? '允许麦克风后可以说话；也可以点“打字”。' : '麦克风暂时不可用，可以重试或打字。', 3200);
+    showToast(error?.name === 'NotAllowedError'
+      ? '请在浏览器或系统设置中允许麦克风，再点中间按钮重试。'
+      : '麦克风暂时不可用。检查设备后，点中间按钮重试。', 5200);
     syncVoiceStatus();
   } finally {
     if (generation === state.captureGeneration) { state.micStarting = false; micButton.disabled = false; }
@@ -2664,7 +3676,7 @@ async function startHandsFreeListening() {
 }
 
 function pauseHandsFreeListening() {
-  state.micMuted = true;
+  state.micMuted = true; state.micFailure = null;
   cancelSpeechCapture();
   const turn = state.activeVoiceTurn;
   const message = state.dialogueHistory.find(item => item.id === turn?.messageId);
@@ -2676,12 +3688,17 @@ function pauseHandsFreeListening() {
 
 function toggleHandsFreeListening(event) {
   event?.preventDefault?.();
+  if (state.voiceConnectionPaused) {
+    state.voiceConnectionPaused = false; state.duplexFailureCount = 0; state.bufferOverflow = false;
+    microphoneBuffer.clear(); syncVoiceStatus(); connectDuplexSession().catch(() => {}); return;
+  }
   if (state.handsFreeListening || state.micStarting) pauseHandsFreeListening();
   else startHandsFreeListening();
 }
 
 function showHint() {
   if (!state.sceneStarted) return;
+  if (globalThis.LumaExperience) { globalThis.LumaExperience.openHelp(); return; }
   const task = currentTask();
   if (['complete', 'task-complete'].includes(state.stage)) {
     return;
@@ -2703,24 +3720,61 @@ function updateParallax(event) {
 }
 
 navButtons.forEach((button) => button.addEventListener('click', () => showView(button.dataset.nav)));
+coffeeMissionButtons.forEach((button) => button.addEventListener('click', () => selectCoffeeMission(button.dataset.coffeeMission)));
 document.querySelectorAll('[data-open-scene]').forEach((button) => button.addEventListener('click', () => {
-  state.selectedScene = button.dataset.openScene;
-  const kitchenSessions = learningProfile.sessions.filter((session) => session.scene === 'kitchen');
-  const guidedDone = state.completed || kitchenSessions.some((session) => session.mode === 'guided');
-  const listeningDone = kitchenSessions.some((session) => session.mode === 'listening');
-  const continueIntoListening = button.classList.contains('primary-cta') && state.selectedScene === 'kitchen' && guidedDone && !listeningDone;
-  startScene({ subtitlesHidden: continueIntoListening });
+  if (button.id === 'adventureCta' && globalThis.LumaExperience) globalThis.LumaExperience.startHome();
+  else openSheet(button.dataset.openScene, button);
 }));
+document.querySelector('#chooseCoffeeMission')?.addEventListener('click', () => {
+  globalThis.LumaExperience?.startHome({ chooseMission: true });
+});
 document.querySelectorAll('[data-preview]').forEach((button) => button.addEventListener('click', () => openSheet(button.dataset.preview, button)));
+document.querySelectorAll('[data-world-scene]').forEach((button) => button.addEventListener('click', () => {
+  openSheet(button.dataset.worldScene, button, button.dataset.worldMission || null);
+}));
 document.querySelectorAll('[data-close-sheet]').forEach((button) => button.addEventListener('click', closeSheet));
 sceneSheet.addEventListener('keydown', trapSheetFocus);
 document.querySelectorAll('[data-filter]').forEach((button) => button.addEventListener('click', () => applyFilter(button.dataset.filter)));
 document.querySelectorAll('[data-setting]').forEach((button) => button.addEventListener('click', () => handleSetting(button)));
-sheetCta.addEventListener('click', () => { if (SCENES[state.selectedScene]?.available) startScene(); });
+document.querySelector('[data-profile-back]')?.addEventListener('click', () => showView(profileReturnView));
+document.querySelectorAll('[data-footprint-tab]').forEach((button) => button.addEventListener('click', () => {
+  const selected = button.dataset.footprintTab;
+  document.querySelectorAll('[data-footprint-tab]').forEach((item) => {
+    const active = item.dataset.footprintTab === selected;
+    item.classList.toggle('is-active', active);
+    item.setAttribute('aria-selected', String(active));
+  });
+  document.querySelectorAll('[data-footprint-panel]').forEach((panel) => { panel.hidden = panel.dataset.footprintPanel !== selected; });
+}));
+sheetCta.addEventListener('click', () => {
+  const selection = sheetSelection;
+  if (!selection || !SCENES[selection.sceneId]?.available) return;
+  if (selection.missionId && !coffeeMissionIsUnlocked(selection.missionId)) return;
+  state.selectedScene = selection.sceneId;
+  if (selection.missionId && !selectCoffeeMission(selection.missionId)) return;
+  startScene({
+    resumeCheckpoint: selection.resumeCheckpoint,
+    skipIntro: Boolean(selection.resumeCheckpoint) && selection.sceneId !== 'coffee',
+    subtitlesHidden: selection.resumeCheckpoint?.practiceMode === 'listening',
+  });
+});
 exitScene.addEventListener('click', leaveScene);
-resetButton.addEventListener('click', () => resetScene());
-subtitleToggle.addEventListener('click', toggleSubtitles);
-replayButton.addEventListener('click', () => speak(state.activeQuestion || currentTask().prompt, { rate: .84 }));
+resetButton.addEventListener('click', () => {
+  if (state.selectedScene === 'coffee') {
+    const sessionId = globalThis.LumaExperience?.currentSession?.();
+    globalThis.LumaExperience?.store?.discardCheckpoint?.({ sessionId });
+  }
+  resetScene();
+});
+subtitleToggle.addEventListener('click', () => { toggleSubtitles(); if (!state.subtitlesHidden) globalThis.LumaExperience?.noteHelp(1, 'subtitles'); });
+replayButton.addEventListener('click', () => {
+  if (['task-complete', 'complete'].includes(state.stage)) {
+    showToast('这一题已经确认，正在继续下一步。', 2600);
+    return;
+  }
+  globalThis.LumaExperience?.noteHelp(1, 'replay');
+  speak(state.activeQuestion || currentTask().prompt, { rate: .84 });
+});
 helpButton.addEventListener('click', showHint);
 micButton.addEventListener('click', toggleHandsFreeListening);
 apple.addEventListener('pointerdown', beginDrag);
@@ -2745,15 +3799,13 @@ document.querySelector('#playRecast').addEventListener('click', () => {
 document.querySelector('#closeReview').addEventListener('click', () => { clearTimeout(state.completionTimer); stopSpeechPlayback(); closeDuplexSession(); reviewScreen.classList.remove('is-active'); reviewScreen.setAttribute('aria-hidden', 'true'); showView('home'); });
 document.querySelector('#finishReview').addEventListener('click', () => { clearTimeout(state.completionTimer); stopSpeechPlayback(); closeDuplexSession(); reviewScreen.classList.remove('is-active'); reviewScreen.setAttribute('aria-hidden', 'true'); showView('home'); });
 repeatSceneButton.addEventListener('click', () => {
-  if (state.practiceMode === 'guided') {
-    startScene({ subtitlesHidden: true });
-    return;
-  }
-  stopSpeechPlayback();
-  closeDuplexSession();
-  reviewScreen.classList.remove('is-active');
-  reviewScreen.setAttribute('aria-hidden', 'true');
-  showView('world');
+  if (state.selectedScene !== 'coffee') { globalThis.LumaExperience?.startTransfer({ fromReview: true }); return; }
+  const ids = Object.keys(COFFEE_MISSION_UI), next = ids[ids.indexOf(state.coffeeMissionId) + 1];
+  if (next && coffeeMissionIsUnlocked(next)) selectCoffeeMission(next);
+  else state.coffeeVariantId = null;
+  clearTimeout(state.completionTimer); stopSpeechPlayback(); closeDuplexSession();
+  reviewScreen.classList.remove('is-active'); reviewScreen.setAttribute('aria-hidden', 'true');
+  startScene();
 });
 document.querySelectorAll('.phrase-cloud button').forEach((button) => button.addEventListener('click', () => speak(button.querySelector('strong').textContent, { rate: .72 })));
 window.addEventListener('resize', updateSceneGeometry);
@@ -2761,6 +3813,7 @@ window.addEventListener('orientationchange', () => setTimeout(updateSceneGeometr
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !state.sceneStarted || state.micMuted) return;
   state.audioContext?.resume().catch(() => {});
+  state.duplexPlayerContext?.resume().catch(() => showToast('声音暂未恢复，可以点重听。'));
   ensureSceneVoiceIsOpen();
   if (!state.duplexReady && !state.duplexConnectPromise) connectDuplexSession().catch(() => {});
 });
@@ -2771,27 +3824,33 @@ document.querySelectorAll('.filter-chip').forEach((button) => {
   button.setAttribute('aria-selected', String(button.classList.contains('is-active')));
 });
 
+globalThis.LumaVisuals?.bind({ state: () => state, task: currentTask, scene, image: backgroundPlane, blur: backgroundBlur });
+globalThis.LumaExperience?.bind({
+  state: () => state, task: currentTask, goal: currentGoalRecord,
+  taskCount: () => currentSceneConfig().tasks.length,
+  start: (sceneId, options) => { state.selectedScene = sceneId; startScene(options); },
+  preview: (sceneId, missionId = null) => openSheet(sceneId, null, missionId),
+  selectCoffeeMission,
+  coffeeJourney: () => {
+    const nextMissionId = Object.keys(COFFEE_MISSION_UI).find(id => !coffeeMissionProgress.completed.includes(id)) || null;
+    return { completed: [...coffeeMissionProgress.completed], nextMissionId,
+      nextMissionTitle: nextMissionId ? COFFEE_MISSION_UI[nextMissionId].title : null };
+  },
+  speak, notify: showAppToast,
+  pauseGuidance: clearIdleNudge,
+  resumeGuidance: () => {
+    if (state.sceneStarted && state.stage === 'active' && !state.micMuted) scheduleIdleNudge();
+  },
+});
 syncSettingsUi();
+syncOuterQuestUi();
 syncHomeProgressState();
 syncLearningUi();
 syncA11yState();
+primaryCta.disabled = false;
+primaryCta.removeAttribute('aria-busy');
 
 
-textAnswerToggle.addEventListener('click', () => {
-  textAnswerForm.hidden = !textAnswerForm.hidden;
-  scene.classList.toggle('is-typing', !textAnswerForm.hidden);
-  textAnswerToggle.setAttribute('aria-expanded', String(!textAnswerForm.hidden));
-  if (!textAnswerForm.hidden) textAnswerInput.focus();
-  else textAnswerInput.blur();
-});
-textAnswerForm.addEventListener('submit', async event => {
-  event.preventDefault();
-  const text = textAnswerInput.value;
-  if (await finishSpeakingAnswer(text)) {
-    textAnswerInput.value = ''; textAnswerInput.blur(); textAnswerForm.hidden = true;
-    scene.classList.remove('is-typing'); textAnswerToggle.setAttribute('aria-expanded', 'false');
-  }
-});
 window.visualViewport?.addEventListener('resize', syncMobileViewport);
 window.visualViewport?.addEventListener('scroll', syncMobileViewport);
 window.addEventListener('resize', syncMobileViewport);
@@ -2804,7 +3863,6 @@ syncMobileViewport();
 window.__lumaDemo = {
   openSheet,
   startScene,
-  finishSpeakingAnswer,
   showReview,
   showView,
   learningSnapshot: () => ({
