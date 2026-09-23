@@ -311,8 +311,9 @@
     closeHelp();
     const goal = adapter.goal();
     goal.supportLevel ??= 0;
-    const count = adapter.taskCount();
-    write('learningStageLabel', `${s().taskIndex + 1} / ${count} · ${details(task().id)[1]}`);
+    const sceneLabels = { coffee: 'Mia · 街角咖啡店', kitchen: 'Luma · 家中早餐', airport: '工作人员 · 机场',
+      office: `${task().speaker || (task().id === 'office-greeting' ? 'Maya' : '前台')} · 初次拜访` };
+    write('learningStageLabel', sceneLabels[s().selectedScene] || '生活里的英语对话');
     checkpoint();
   }
 
@@ -561,50 +562,45 @@
     const { totals, profile, due, upcoming, strengthen } = notes;
     const completed = profile.sessions.filter(session => session.completedAt);
     const successful = profile.attempts.filter(attempt => attempt.outcome === 'success');
-    const title = due.length
-      ? `今日复习 ${due.length} 项`
-      : strengthen.length ? `再练 ${strengthen.length} 项`
-      : completed.length ? '学习记录'
-      : '开始第一段练习';
-    write('learningNotesTitle', title);
-    write('growthSummary', due.length || strengthen.length
-      ? `${due.length ? `${due.length} 项今天适合复习` : '今天没有到期复习'}${strengthen.length ? ` · ${strengthen.length} 项仍需帮助` : ''}`
-      : totals.independentTargetCount
-        ? `你已在 ${totals.independentTargetCount} 个生活表达上留下独立开口记录。`
-        : completed.length ? '经历已经保存；有了独立英语回应后，成果会继续积累。' : '完成一次生活场景后，这里会留下可复习的真实记录。');
-
-    write('reviewOverviewTitle', due.length ? `${due.length} 项今天适合再练` : '今天没有到期复习');
-    write('reviewOverviewCopy', due.length
-      ? '先试着自己回应，需要时再打开帮助。'
-      : upcoming.length ? `下一项安排在 ${shortDate(upcoming[0].dueAt)}，现在也可以继续最近的场景。`
-      : completed.length ? '可以回到最近完成的场景，再开口练一次。' : '完成第一段生活场景后，这里会安排合适的再练习。');
+    write('learningNotesTitle', '学习笔记');
+    write('growthSummary', due.length ? `${due.length} 项今天适合复习` : completed.length ? '把用过的英语，再用一次。' : '从一件生活小事开始。');
+    const next = due.length ? store.nextStep({ preferReview: true }) : homeStep();
+    const sceneId = next.sceneId || 'coffee';
+    const scene = SCENES[sceneId] || SCENES.coffee;
+    const reviewTarget = due.find(item => (next.targetIds || []).includes(item.targetId)) || due[0];
+    const taskTitles = {
+      'choose-drink': sceneId === 'coffee' ? '再点一杯喜欢的咖啡' : '再选一杯喜欢的饮料',
+      'choose-size': '说清楚想要的杯型', 'choose-service': '告诉店员堂食还是带走',
+      'thank-person': '接过咖啡，说声谢谢', 'offer-item': sceneId === 'kitchen' ? '回应她，把杯子递过去' : '把登机牌给工作人员',
+      'adjust-amount': '说说还想不想再来一点', 'confirm-belonging': '确认自己的行李',
+      'find-location': '问清楚要去的地方', 'state-purpose': '说清楚这次的来意',
+      'give-name': '介绍一下自己的名字', 'receive-information': '听懂对方的安排',
+      greet: '和新认识的人打个招呼',
+    };
+    write('notesReviewEyebrow', due.length ? '今天再用一次' : completed.length ? '下一件生活小事' : '从一件小事开始');
+    write('notesReviewCount', due.length ? `${due.length} 项待复习` : '');
+    if ($('notesReviewCount')) $('notesReviewCount').hidden = !due.length;
+    write('notesReviewScene', scene.context);
+    if ($('notesReviewImage')) $('notesReviewImage').src = scene.image;
+    write('reviewOverviewTitle', due.length ? (taskTitles[reviewTarget?.targetId] || targetLabel(reviewTarget?.targetId)) : next.title || scene.title.replace('\n', ''));
+    write('reviewOverviewCopy', due.length ? '隔了一段时间，再试着自己说。需要时仍可打开提示。'
+      : next.kind === 'resume' ? '从这件小事的开头继续，按自己的节奏来。'
+      : upcoming.length ? `下一次复习在 ${shortDate(upcoming[0].dueAt)}。现在也可以先继续生活。`
+      : completed.length ? '在熟悉的生活里，再开口说一次。' : '和对方打声招呼，从一句简单的英语开始。');
     const journey = adapter?.coffeeJourney?.();
-    const reviewAction = due.length ? '开始今日复习'
+    const reviewAction = due.length ? '开始复习'
       : store.getCheckpoint() ? '继续上次练习'
       : journey?.nextMissionId ? (journey.completed?.length ? '继续当前旅程' : '开始当前旅程')
       : completed.length ? '再练最近场景' : '开始第一段练习';
     setButtonLabel('startReview', reviewAction);
-
     if ($('reviewQueueList')) {
-      const reviewRows = due.length ? due.slice(0, 2).map(item => row(
-          targetLabel(item.targetId),
-          `${sceneLabel(item.lastSceneId)} · 今天适合再练`,
-          'arrow-counter-clockwise',
-          { label: '先看场景', sceneId: item.lastSceneId },
-        )) : [row(
-          upcoming.length ? '下一次复习已安排' : completed.length ? '今天没有到期内容' : '先留下一次真实回应',
-          upcoming.length ? `${shortDate(upcoming[0].dueAt)} 再来试试；现在也可以继续练习。`
-            : completed.length ? '继续练习时，系统会按真实完成条件更新记录。' : '看过提示与自己说出，会分别记录。',
-          upcoming.length ? 'calendar-blank' : completed.length ? 'check-circle' : 'chat-circle-dots',
-        )];
-      if (due.length > 2) {
-        const more = document.createElement('p');
-        more.className = 'review-queue-more';
-        more.textContent = `另外 ${due.length - 2} 项今天也可以逐项练习。`;
-        reviewRows.push(more);
-      }
-      $('reviewQueueList').replaceChildren(...reviewRows);
+      const remaining = due.filter(item => item !== reviewTarget);
+      const more = document.createElement('p'); more.className = 'review-queue-more';
+      more.textContent = remaining.length ? `还可以复习：${remaining.slice(0, 2).map(item => targetLabel(item.targetId)).join('、')}${remaining.length > 2 ? `等 ${remaining.length} 项` : ''}` : '';
+      $('reviewQueueList').replaceChildren(...(remaining.length ? [more] : []));
     }
+    if ($('notesPracticeFold')) $('notesPracticeFold').hidden = !strengthen.length;
+    write('notesHistorySummary', completed.length ? `已完成 ${completed.length} 次练习 · 查看记录` : '每一次开口，都留在这里');
     write('strengthCount', `${strengthen.length} 项`);
     if ($('strengthList')) {
       const strengthRows = strengthen.length ? strengthen.map(item => row(
@@ -742,34 +738,51 @@
     const container = $('worldEvidenceList');
     if (!container) return;
     const byTarget = new Map();
-    for (const item of profile.attempts.filter(a => a.outcome === 'success').sort(byEvidenceTime)) {
+    const attempts = profile.attempts.filter(a => a.outcome !== 'technical-error' && Date.parse(a.at) <= Date.now()).sort(byEvidenceTime);
+    for (const item of attempts) {
       if (!byTarget.has(item.targetId)) byTarget.set(item.targetId, []);
       byTarget.get(item.targetId).push(item);
     }
-    const targets = [...byTarget].sort(([a], [b]) => (a === 'choose-drink' ? -1 : b === 'choose-drink' ? 1 : 0));
-    const cards = targets.slice(0, 3).map(([targetId, attempts]) => {
-      const latest = attempts.at(-1);
-      const previous = [...attempts].reverse().find(item => item.sessionId !== latest.sessionId);
-      const card = document.createElement('article'); card.className = 'world-evidence-card';
-      const title = document.createElement('h3'); title.textContent = targetLabel(targetId); card.append(title);
-      for (const [label, item] of [['上次', previous], [previous ? '这次' : '首次记录', latest]]) {
-        if (!item) continue;
-        const line = document.createElement('p');
-        const meta = document.createElement('small'); meta.textContent = `${label} · ${shortDate(item.at)} · ${sceneLabel(item.sceneId)}`;
-        const text = document.createElement('span'); text.textContent = evidenceCondition(item);
-        line.append(meta, text); card.append(line);
+    const changes = [];
+    for (const [targetId, records] of byTarget) {
+      const latest = records.at(-1);
+      const previous = [...records].reverse().find(item => item.sessionId !== latest.sessionId && item.outcome === 'success');
+      if (!englishVoice(latest) || !independent(latest) || !previous) continue;
+      let before = '', after = '', note = '';
+      if (previous.productionCondition === 'assisted') {
+        before = '需要表达提示'; after = '没看答案，也说出来了';
+        note = '这次少用了一点帮助。';
+      } else if (englishVoice(previous) && independent(previous) && previous.listeningCondition === 'assisted' && latest.listeningCondition === 'independent') {
+        before = '借助字幕或听力帮助'; after = '只听声音，也回应了';
+        note = '这次听懂后，自己接上了话。';
+      } else if (englishVoice(previous) && independent(previous) && previous.sceneId !== latest.sceneId) {
+        before = sceneLabel(previous.sceneId); after = sceneLabel(latest.sceneId);
+        note = '换了个地方，也独立表达了一次。';
       }
-      const note = document.createElement('p'); note.className = 'world-evidence-note';
-      note.textContent = previous && previous.sceneId !== latest.sceneId
-        && previous.productionCondition === 'independent' && latest.productionCondition === 'independent'
-        ? '换了一个场景，又独立表达了一次。'
-        : previous?.productionCondition === 'assisted' && latest.productionCondition === 'independent'
-          ? '这次没有再看答案提示。隔一段时间，还可以再试试。'
-          : '留下这次的条件，下次再看看有什么变化。';
-      card.append(note); return card;
-    });
-    if (!cards.length) cards.push(row('第一段生活，从开口开始', '完成一次交流后，这里会记录场景和帮助条件。', 'plant'));
-    container.replaceChildren(...cards);
+      if (note) changes.push({ targetId, latest, previous, before, after, note });
+    }
+    changes.sort((a, b) => byEvidenceTime(b.latest, a.latest));
+    const change = changes[0];
+    if ($('worldEvidenceSection')) $('worldEvidenceSection').hidden = !change;
+    container.replaceChildren();
+    if (change) {
+      const card = document.createElement('article'); card.className = 'world-evidence-card';
+      const title = document.createElement('h3'); title.textContent = targetLabel(change.targetId);
+      const comparison = document.createElement('div'); comparison.className = 'notes-progress-comparison';
+      for (const [label, text, item] of [['上次', change.before, change.previous], ['这次', change.after, change.latest]]) {
+        const line = document.createElement('div'), meta = document.createElement('small'), value = document.createElement('span');
+        meta.textContent = `${label} · ${shortDate(item.at)}`; value.textContent = text; line.append(meta, value); comparison.append(line);
+      }
+      const note = document.createElement('p'); note.className = 'world-evidence-note'; note.textContent = change.note;
+      card.append(title, comparison, note); container.append(card);
+    }
+    const history = $('notesEvidenceList');
+    if (history) {
+      const recent = [...attempts].reverse().slice(0, 12);
+      if ($('notesEvidenceHistory')) $('notesEvidenceHistory').hidden = !recent.length;
+      history.replaceChildren(...recent.map(item => row(targetLabel(item.targetId),
+        `${shortDate(item.at)} · ${sceneLabel(item.sceneId)} · ${item.outcome === 'success' ? evidenceCondition(item) : '这次还未确认意思'}`, 'chat-circle')));
+    }
   }
 
   function noteFocusStudy(kind) {

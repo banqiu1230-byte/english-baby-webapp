@@ -9,7 +9,9 @@
     "check": "node --check dialogue-rules.js && node --check voice-runtime.js && node --check microphone-worklet.js && node --check breakfast.js && node --check coffee.js && node --check scene-visuals.js && node --check breakfast-ui.js && node --check learning-evidence.js && node --check world-learning-loop.js && node --check learning-experience.js && node --check app.js && node --check server.js",
     "test": "node --test *.test.js",
     "test:browser": "node test-support/breakfast-browser.cjs && node test-support/intro-browser.cjs",
-    "test:world-browser": "node test-support/world-loop-browser.cjs"
+    "test:world-browser": "node test-support/world-loop-browser.cjs",
+    "test:notes-browser": "node test-support/notes-browser.cjs",
+    "test:conversation-browser": "node test-support/conversation-ui-browser.cjs"
   },
   "keywords": [],
   "author": "",

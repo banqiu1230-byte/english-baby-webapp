@@ -172,7 +172,7 @@ test('a confirmed coffee step cancels a runaway provider reply immediately', () 
   assert.equal(h.c.isConversationTurnPending(), false);
 });
 
-test('a partly matching target order keeps correct facts and labels only the conflict', () => {
+test('a guest order differing from the reference confirms every stated fact', () => {
   const h = coffeeHarness();
   h.s.coffee = Coffee.missionInitial('C04', 'C04-large-latte-to-go');
   h.s.coffeeMissionId = 'C04';
@@ -182,12 +182,12 @@ test('a partly matching target order keeps correct facts and labels only the con
     sceneId: 'coffee', taskId: 'coffee-order', taskIndex: 0, source: 'voice', question: 'What can I get for you?' };
   const missionResult = Coffee.advanceMission(h.s.coffee, message.text);
   h.c.applyDynamicFeedback({ meaning_valid: true, missionResult }, context);
-  assert.deepEqual([h.s.coffee.drink, h.s.coffee.size, h.s.coffee.service], ['latte', 'large', null]);
+  assert.deepEqual([h.s.coffee.drink, h.s.coffee.size, h.s.coffee.service], ['latte', 'large', 'here']);
   assert.equal(message.taskAccepted, true);
-  assert.equal(message.status, '已确认 2 项 · 堂食或带走再试一次');
+  assert.equal(message.status, '已确认');
 });
 
-test('saying for here against a to-go target stays on service and is never confirmed', () => {
+test('saying for here against a to-go reference confirms service without corrective interrogation', () => {
   const h = coffeeHarness();
   h.s.coffee = Coffee.advanceMission(
     Coffee.missionInitial('C04', 'C04-large-americano-to-go'),
@@ -202,20 +202,18 @@ test('saying for here against a to-go target stays on service and is never confi
     sceneId: 'coffee', taskId: 'coffee-service', taskIndex: 2, source: 'voice',
     question: 'Is that for here or to go?' };
   const missionResult = Coffee.advanceMission(h.s.coffee, message.text);
-  h.c.applyDynamicFeedback({ meaning_valid: false, missionResult }, context);
-  assert.equal(h.s.coffee.service, null);
-  assert.equal(Coffee.nextMissionStep(h.s.coffee).taskId, 'coffee-service');
-  assert.equal(message.taskAccepted, false);
-  assert.equal(message.status, '堂食或带走与任务不一致 · 再试一次');
-  assert.deepEqual(h.effects.find(effect => effect.type === 'spoken'), {
-    type: 'spoken', text: 'Please check the order. Is it for here or to go?',
-  });
+  h.c.applyDynamicFeedback({ meaning_valid: true, missionResult }, context);
+  assert.equal(h.s.coffee.service, 'here');
+  assert.equal(Coffee.nextMissionStep(h.s.coffee).taskId, 'coffee-thanks');
+  assert.equal(message.taskAccepted, true);
+  assert.equal(message.status, '已确认');
+  assert.equal(h.effects.some(effect => /check the order|say to go|correct/i.test(effect.text || '')), false);
 });
 
-test('resume reconciliation never marks a conflicting target field complete', () => {
+test('resume reconciliation keeps confirmed actual choices even if the teaching reference differs', () => {
   const h = coffeeHarness();
   h.load('resolvedCoffeeTaskIds');
   const stale = { ...Coffee.missionInitial('C04', 'C04-large-americano-here'),
     drink: 'americano', size: 'large', service: 'to-go' };
-  assert.deepEqual([...h.c.resolvedCoffeeTaskIds(stale)], ['coffee-order', 'coffee-size']);
+  assert.deepEqual([...h.c.resolvedCoffeeTaskIds(stale)], ['coffee-order', 'coffee-size', 'coffee-service']);
 });

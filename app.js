@@ -386,6 +386,7 @@ const state = {
   voicePhase: 'idle',
   voiceTurnSerial: 0,
   activeVoiceTurn: null,
+  conversationFocus: 'task',
   lastFinalizedUser: null,
   ignoredTranscriptItems: new Set(),
   courtesyTimer: null,
@@ -504,7 +505,7 @@ function syncCoffeeMissionBoard() {
   const explicit = state.introduction?.explicitMode && state.introduction.missionId === state.coffeeMissionId;
   const listening = explicit ? Boolean(state.introduction.subtitlesHidden) : state.coffeeMissionId === 'C04';
   coffeeMissionBrief.textContent = state.coffeeMissionId === 'C04' && targetText
-    ? `本次目标：${targetText}。${listening ? '这次先不看字幕，需要时随时打开。' : '这次保留字幕，需要时可以查看提示。'}`
+    ? `点单参考：${targetText}，也可以按自己的喜好点单。${listening ? '这次先不看字幕，需要时随时打开。' : '这次保留字幕，需要时可以查看提示。'}`
     : `${mission.brief}${explicit && listening ? ' 这次先听声音，字幕和提示随时可打开。' : ''}`;
   const readyLabel = document.querySelector('#introReady span');
   if (readyLabel) readyLabel.textContent = listening ? '先听着试一次' : `开始任务 ${state.coffeeMissionId}`;
@@ -540,11 +541,9 @@ function syncCoffeeMissionHud() {
   const mission = coffeeMissionMeta();
   const tasks = currentSceneConfig().tasks;
   missionHudCode.textContent = `任务 ${state.coffeeMissionId}`;
-  const target = coffeeTargetState();
-  const targetText = target ? ['size', 'drink', 'service'].map(slot => coffeeSlotLabel(slot, target[slot])).join(' · ') : '';
-  missionHudTitle.textContent = targetText ? `${mission.title} · ${targetText}` : mission.title;
+  missionHudTitle.textContent = mission.title;
   missionHudProgress.textContent = `${Math.min(state.taskIndex + 1, tasks.length)} / ${tasks.length}`;
-  orderSlots.setAttribute('aria-label', state.coffeeMissionId === 'C03' ? '实际收到的咖啡' : '订单进度');
+  orderSlots.setAttribute('aria-label', state.coffeeMissionId === 'C03' ? '实际收到的咖啡' : '你的点单');
   const order = coffeeOrderState();
   const delivered = coffeeDeliveredState();
   for (const element of orderSlots.querySelectorAll('[data-order-slot]')) {
@@ -552,7 +551,7 @@ function syncCoffeeMissionHud() {
     const value = state.coffeeMissionId === 'C03' ? delivered[slot] : order[slot];
     element.textContent = coffeeSlotLabel(slot, value);
     element.classList.toggle('is-filled', Boolean(value));
-    element.classList.toggle('is-wrong', Boolean(target?.[slot] && value && target[slot] !== value));
+    element.classList.toggle('is-wrong', state.coffeeMissionId === 'C03' && Boolean(value && value !== order[slot]));
   }
 }
 
@@ -637,9 +636,9 @@ function resolvedCoffeeTaskIds(world = state.coffee) {
   if (mission.kind === 'delivery-repair') {
     if (!world.repair?.required) resolved.add('coffee-size');
   } else {
-    if (world.drink && (!world.target || world.drink === world.target.drink)) resolved.add('coffee-order');
-    if (world.size && (!world.target || world.size === world.target.size)) resolved.add('coffee-size');
-    if (world.service && (!world.target || world.service === world.target.service)) resolved.add('coffee-service');
+    if (world.drink) resolved.add('coffee-order');
+    if (world.size) resolved.add('coffee-size');
+    if (world.service) resolved.add('coffee-service');
   }
   if (world.received) resolved.add('coffee-thanks');
   return resolved;
@@ -1050,6 +1049,16 @@ function finalizeLearnerTranscript(transcript, { turn = state.activeVoiceTurn } 
   if (turn.superseded && DialogueRules.supportIntent(clean)) return;
   if (!turn.superseded && message && stageTransitionUtterance(clean, turn, message)) return;
   if (!turn.superseded && message && acknowledgeCompletedTurn(clean, message)) return;
+  if (!turn.superseded && state.selectedScene === 'coffee' && ['task-complete', 'complete'].includes(state.stage)) {
+    if (state.stage === 'task-complete' && DialogueRules.supportIntent(clean) === 'continue') {
+      const next = currentSceneConfig().tasks.findIndex((candidate, index) => index > state.taskIndex && !state.coveredGoals.has(candidate.id));
+      if (next >= 0) { state.conversationFocus = 'task'; startTask(next); return; }
+    }
+    state.conversationFocus = 'chat';
+    clearTimeout(state.advanceTimer); state.advanceTimer = null;
+    clearTimeout(state.reviewTimer); state.reviewTimer = null;
+    clearIdleNudge();
+  }
   if (!turn.superseded && !turn.responseStarted && (!state.expectedResponse || state.expectedResponse.turnId === turn.id)) {
     if (!state.expectedResponse) beginExpectedResponse('user', { questionId: turn.itemId, turnId: turn.id });
     state.awaitingModelReply = true;
@@ -1070,6 +1079,7 @@ function finalizeLearnerTranscript(transcript, { turn = state.activeVoiceTurn } 
 
 function acknowledgeCompletedTurn(text, message) {
   if (state.selectedScene !== 'coffee' || !['task-complete', 'complete'].includes(state.stage)) return false;
+  if (state.conversationFocus === 'chat') return false;
   const clean = String(text).toLowerCase().replace(/[.,!，。！]/g, '').trim();
   const courtesy = /^(yes|yeah|yep|yup|ok|okay|right|sure|correct|that's right|thank you|thanks|对|对的|是的|好|好的|嗯|嗯嗯|没错|谢谢)(\s+(please|thanks|thank you|yes|yeah))?$/.test(clean);
   const repeat = Coffee.advanceMission(state.coffee, text);
@@ -1096,7 +1106,7 @@ function stageTransitionUtterance(text, turn, message) {
   const nextTask = tasks[nextTaskIndex];
   const engineStep = Coffee.nextMissionStep?.(state.coffee);
   if (!nextTask || engineStep?.taskId !== nextTask.id) return false;
-  const preview = Coffee.advanceMission(state.coffee, text, { expectedRevision: state.coffee?.revision });
+  const preview = Coffee.advanceMission(state.coffee, text, { expectedRevision: state.coffee?.revision, question: turn.context?.question });
   const advancesNextTask = preview.accepted
     && (preview.changedFields || []).map(coffeeTaskForChangedField).includes(nextTask.id);
   if (!advancesNextTask) return false;
@@ -1110,6 +1120,10 @@ function stageTransitionUtterance(text, turn, message) {
   };
   message.status = '已听到 · 下一步出现后确认';
   renderDialogue();
+  if (state.conversationFocus === 'chat') {
+    state.conversationFocus = 'task';
+    scheduleTaskAdvance(nextTaskIndex);
+  }
   return true;
 }
 
@@ -1203,6 +1217,10 @@ function syncSceneProgress() {
   sceneProgress.setAttribute('aria-valuenow', String(completed));
   sceneProgress.setAttribute('aria-valuetext', missing.length ? `已完成 ${completed}/${tasks.length}，当前还需${missing.join('和')}` : `已完成 ${completed}/${tasks.length}`);
   syncCoffeeMissionHud();
+  const canFinish = state.selectedScene === 'coffee' && state.stage === 'complete';
+  const finish = document.querySelector('#finishConversation');
+  if (finish) finish.hidden = !canFinish;
+  resetButton.hidden = canFinish;
 }
 
 function markGoalHeard() {
@@ -1386,6 +1404,7 @@ function clearIdleNudge() {
 
 function scheduleIdleNudge() {
   clearIdleNudge();
+  if (state.conversationFocus === 'chat') return;
   const task = currentTask();
   const hasMissingStep = (taskNeedsSpeech(task) && !state.speechDone) || (taskNeedsAction(task) && !state.actionDone);
   if (!state.sceneStarted || !hasMissingStep || state.micMuted || state.idleNudgeCount >= 2 || ['complete', 'task-complete'].includes(state.stage)) return;
@@ -1440,15 +1459,16 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
   }
   message.inputSource = inputSource;
   if (feedback.conversational) {
+    state.conversationFocus = 'chat';
+    clearIdleNudge();
     message.status = '继续当前对话';
     renderDialogue();
-    scheduleIdleNudge();
     return;
   }
   if (state.selectedScene === 'coffee' && Coffee.isTask(context.taskId)) {
     const eventId = `${context.evidenceSessionId || state.practiceSession}:${context.messageId}:${context.revision}`;
     let missionFeedback = feedback.missionResult || Coffee.advanceMission(state.coffee, message.text, {
-      eventId, expectedRevision: state.coffee?.revision,
+      eventId, expectedRevision: state.coffee?.revision, question: context.question,
     });
     if (!feedback.missionResult && feedback.choice && missionFeedback.accepted) {
       const interpreted = Object.values(missionFeedback.interpretation?.slots || {});
@@ -1460,22 +1480,24 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
       eventId, expectedRevision: state.coffee?.revision,
     });
     if (missionFeedback.accepted) {
-      const mismatch = missionFeedback.targetMismatches?.[0];
+      state.conversationFocus = 'task';
       const resolvedCurrentStep = !missionFeedback.nextStep?.taskId || missionFeedback.nextStep.taskId !== currentTask().id;
-      const labels = { drink: '咖啡种类', size: '杯型', service: '堂食或带走' };
-      const acceptedStatus = mismatch
-        ? `已确认 ${missionFeedback.changedFields?.length || 1} 项 · ${labels[mismatch.field] || '一项'}再试一次`
-        : '已确认';
       const committed = commitCoffeeChoice(feedback.choice, {
         utterance: message.text, source: inputSource, missionFeedback, context,
       });
       message.taskAccepted = committed && resolvedCurrentStep;
-      message.status = committed ? acceptedStatus : '未确认 · 请再试一次';
+      message.status = committed ? '已确认' : '未确认 · 请再试一次';
       renderDialogue();
     }
     else {
-      globalThis.LumaExperience?.noteAnswer(context, 'unconfirmed');
-      if (['question', 'help', 'not-ready'].includes(missionFeedback.reason)
+      if (missionFeedback.reason !== 'conversation') globalThis.LumaExperience?.noteAnswer(context, 'unconfirmed');
+      if (missionFeedback.reason === 'conversation-repair') {
+        message.status = '已听到';
+        renderDialogue();
+        stopSpeechPlayback();
+        clearIdleNudge();
+        speak(missionFeedback.prompt).then(() => scheduleIdleNudge());
+      } else if (['conversation', 'question', 'help', 'not-ready'].includes(missionFeedback.reason)
         || (missionFeedback.reason === 'no-decision' && missionFeedback.interpretation?.kind !== 'ambiguous')
         || (missionFeedback.reason === 'repair-not-resolved'
           && !Object.keys(missionFeedback.interpretation?.slots || {}).length)) {
@@ -1488,20 +1510,9 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
         // explicit prompt here would cancel that reply and mechanically repeat
         // the task question, which makes natural requests feel stuck.
         message.status = '继续当前对话';
-        renderDialogue();
-      } else if (missionFeedback.reason === 'target-mismatch') {
-        const field = missionFeedback.targetMismatches?.[0]?.field;
-        const labels = { drink: '咖啡种类', size: '杯型', service: '堂食或带走' };
-        message.taskAccepted = false;
-        message.status = `${labels[field] || '这一项'}与任务不一致 · 再试一次`;
-        renderDialogue();
-        state.currentSpeech = missionFeedback.prompt;
-        state.activeQuestion = missionFeedback.prompt;
+        state.conversationFocus = 'chat';
         clearIdleNudge();
-        speak(missionFeedback.prompt).then(started => {
-          if (!started) showToast(`Mia：${missionFeedback.prompt}`, 5200);
-          scheduleIdleNudge();
-        });
+        renderDialogue();
       } else if (missionFeedback.prompt) {
         state.currentSpeech = missionFeedback.prompt;
         state.activeQuestion = missionFeedback.prompt;
@@ -1553,14 +1564,22 @@ async function requestLanguageFeedback(question, answer, turnContext = {}) {
     const choice = Breakfast.choiceFromText(context.taskId, answer, question);
     if (choice) { applyDynamicFeedback({ meaning_valid: true, choice }, context); return; }
   } else if (state.selectedScene === 'coffee' && Coffee.isTask(context.taskId)) {
+    if (Coffee.isConversationOnly(answer, question)) {
+      applyDynamicFeedback({ conversational: true }, context); return;
+    }
     const eventId = `${context.evidenceSessionId || state.practiceSession}:${context.messageId}:${context.revision}`;
-    const missionResult = Coffee.advanceMission(state.coffee, answer, { eventId, expectedRevision: state.coffee?.revision });
+    const missionResult = Coffee.advanceMission(state.coffee, answer, { eventId, expectedRevision: state.coffee?.revision, question });
     if (!missionResult.accepted && DialogueRules.isSmallTalk(answer)) {
       applyDynamicFeedback({ conversational: true }, context); return;
     }
     if (missionResult.accepted || missionResult.handled) {
       applyDynamicFeedback({ meaning_valid: missionResult.accepted, missionResult }, context); return;
     }
+    // An ordinary conversational turn should not wait on a second grading
+    // request before Mia can speak. If an order is unclear, she can clarify
+    // one actual option and the next reply will be interpreted in context.
+    const asksToOrder = /\b(?:i want|i would like|i['’]d like|i['’]ll have|(?:can|could|may) i (?:have|get|order))\b|我要|我想要|我想点/i.test(answer);
+    if (!asksToOrder) { applyDynamicFeedback({ conversational: true }, context); return; }
   } else if (isCurrentTaskQuestion(question) && DialogueRules.matchesTask(context.taskId, answer)) {
     applyDynamicFeedback({ meaning_valid: true }, context); return;
   }
@@ -1596,15 +1615,10 @@ function coffeeTaskForChangedField(field) {
 }
 
 function recordCoffeeMissionEvidence(result, context, utterance, source) {
-  const mismatches = new Set([
-    ...(result.comparison?.mismatches || []).map(item => item.field),
-    ...(result.targetMismatches || []).map(item => item.field),
-  ]);
   const taskIds = [...new Set((result.changedFields || []).map(coffeeTaskForChangedField).filter(Boolean))];
   const currentSupport = goalRecord(context.taskId);
   for (const taskId of taskIds) {
-    const field = taskId === 'coffee-order' ? 'drink' : taskId === 'coffee-size' ? 'size' : taskId === 'coffee-service' ? 'service' : 'received';
-    const success = !mismatches.has(field);
+    const success = true;
     const goal = goalRecord(taskId);
     goal.supportLevel = Math.max(goal.supportLevel || 0, currentSupport.supportLevel || context.supportLevel || 0);
     goal.supportKinds = [...new Set([...(goal.supportKinds || []), ...(currentSupport.supportKinds || [])])];
@@ -1616,12 +1630,6 @@ function recordCoffeeMissionEvidence(result, context, utterance, source) {
       messageId: `${context.messageId}:${taskId}`, answer: utterance, source }, success ? 'success' : 'unconfirmed');
     if (success && taskId !== context.taskId && currentSceneConfig().tasks.some(task => task.id === taskId)) state.coveredGoals.add(taskId);
   }
-  for (const mismatch of result.targetMismatches || []) {
-    const taskId = coffeeTaskForChangedField(mismatch.field);
-    if (!taskId) continue;
-    globalThis.LumaExperience?.noteAnswer({ ...context, taskId,
-      messageId: `${context.messageId}:${taskId}:mismatch`, answer: utterance, source }, 'unconfirmed');
-  }
 }
 
 function commitCoffeeChoice(choice, { source = 'voice', utterance = '', missionFeedback = null, context = null } = {}) {
@@ -1630,7 +1638,7 @@ function commitCoffeeChoice(choice, { source = 'voice', utterance = '', missionF
   const expectedStep = Coffee.nextMissionStep?.(state.coffee);
   if (expectedStep?.taskId && expectedStep.taskId !== currentTask().id) return false;
   const eventId = context ? `${context.evidenceSessionId || state.practiceSession}:${context.messageId}:${context.revision}` : '';
-  let result = missionFeedback || Coffee.advanceMission(state.coffee, utterance, { eventId, expectedRevision: state.coffee?.revision });
+  let result = missionFeedback || Coffee.advanceMission(state.coffee, utterance, { eventId, expectedRevision: state.coffee?.revision, question: context?.question || state.activeQuestion });
   if (!result.accepted && choice) result = Coffee.advanceMission(state.coffee, choice, { eventId, expectedRevision: state.coffee?.revision });
   if (!result.accepted || !result.world) return false;
   state.coffee = result.world;
@@ -2222,8 +2230,10 @@ function publishDuplexSubtitle() {
   // Judge facts only after the current learner decision settles. Before
   // that, an otherwise correct confirmation may merely be ahead of state.
   if (state.expectedResponse?.kind === 'user' && state.selectedScene === 'coffee'
-    && Coffee.replyContradictsOrder(reply, state.coffee)) {
-    discardReasoningLeak(Coffee.promptFor(currentTask().id, state.coffee));
+    && (Coffee.replyContradictsOrder(reply, state.coffee) || Coffee.replyViolatesScene(reply))) {
+    const learner = state.dialogueHistory.findLast(item => item.speaker === 'user' && item.final);
+    const recovery = Coffee.conversationReply(learner?.text, state.coffee, { question: state.activeQuestion });
+    discardReasoningLeak(recovery || Coffee.promptFor(currentTask().id, state.coffee));
     return false;
   }
   if (state.expectedResponse?.textOnlyDone) {
@@ -2287,6 +2297,7 @@ function asksForCompletedAction(value) {
 }
 
 function transitionReplyReplacement(value) {
+  if (state.conversationFocus === 'chat') return '';
   const tasks = currentSceneConfig().tasks;
   const replacement = DialogueRules.transitionReplyReplacement({
     text: value,
@@ -2923,6 +2934,7 @@ function showPendingTaskPrompt(line = currentTask().prompt, { updatesQuestion = 
 }
 
 function startTask(index, { speakAgain = true } = {}) {
+  state.conversationFocus = 'task';
   appShell.scrollTop = 0;
   clearReviewTransition();
   clearTaskAdvance();
@@ -3444,6 +3456,9 @@ function scheduleTaskAdvance(nextTaskIndex) {
 
 function scheduleReview() {
   clearReviewTransition();
+  // The order is complete, but the conversation belongs to the guest.
+  // They can keep talking and open the reflection with End conversation.
+  if (state.selectedScene === 'coffee') return;
   let quietSince = 0;
 
   const waitForStableQuiet = () => {
@@ -3810,7 +3825,11 @@ sheetCta.addEventListener('click', () => {
     subtitlesHidden: selection.resumeCheckpoint?.practiceMode === 'listening',
   });
 });
-exitScene.addEventListener('click', leaveScene);
+exitScene.addEventListener('click', () => {
+  if (state.selectedScene === 'coffee' && state.stage === 'complete') showReview();
+  else leaveScene();
+});
+document.querySelector('#finishConversation')?.addEventListener('click', showReview);
 resetButton.addEventListener('click', () => {
   if (state.selectedScene === 'coffee') {
     const sessionId = globalThis.LumaExperience?.currentSession?.();

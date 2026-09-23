@@ -44,11 +44,13 @@ test('help, information questions, uncertain or ambiguous words never complete a
   for (const text of ['What is a latte?', 'Latte?', 'Latte or americano', 'Maybe latte', 'I think latte', 'I do not want latte', 'I don’t know', '什么意思', '怎么说', '我不懂', 'Wait', 'Continue', 'Again'])
     assert.equal(Coffee.choiceFromText('coffee-order', text, Coffee.initial()), null, text);
   for (const [task, world] of [['coffee-order', Coffee.initial()], ['coffee-size', ordered()], ['coffee-service', sized()]]) {
-    for (const question of [Coffee.promptFor(task, world), 'Do you want a latte?', 'Do you live here?'])
+    for (const question of [Coffee.promptFor(task, world), 'Do you live here?'])
       for (const answer of ['Yes.', 'No.', 'Okay.'])
         assert.equal(Coffee.choiceFromText(task, answer, world, question), null);
   }
   assert.equal(Coffee.choiceFromText('coffee-service', 'For here or to go?', sized()), null);
+  assert.equal(Coffee.choiceFromText('coffee-order', 'Yes, please.', Coffee.initial(), 'Do you want a latte?'), 'latte');
+  assert.equal(Coffee.choiceFromText('coffee-order', 'No.', Coffee.initial(), 'Do you want a latte?'), null);
 });
 
 test('only thanks after the prepared order completes the final step', () => {
@@ -166,78 +168,69 @@ test('confirmed fields change only through an explicit or task-controlled correc
 
 });
 
-test('target-order missions keep matching details and retry only the conflicting field', () => {
-  for (const [missionId, variantId, utterance, mismatch, prompt] of [
-    ['C02', undefined, 'A large latte to go, please.',
-      { field: 'size', expected: 'small', actual: 'large' }, 'Please check the order. What size should it be?'],
-    ['C04', 'C04-large-latte-to-go', 'A large latte for here, please.',
-      { field: 'service', expected: 'to-go', actual: 'here' }, 'Please check the order. Is it for here or to go?'],
+test('suggested-order missions fulfil the guest order and keep the teaching reference separately', () => {
+  for (const [missionId, variantId, utterance, actual] of [
+    ['C02', undefined, 'A large latte to go, please.', ['latte', 'large', 'to-go']],
+    ['C04', 'C04-large-latte-to-go', 'A large latte for here, please.', ['latte', 'large', 'here']],
   ]) {
     const initial = Coffee.missionInitial(missionId, variantId);
-    const result = Coffee.advanceMission(initial, utterance, { eventId: `${missionId}-wrong-target` });
+    const result = Coffee.advanceMission(initial, utterance, { eventId: `${missionId}-guest-choice` });
     assert.equal(result.accepted, true, missionId);
     assert.equal(result.handled, true, missionId);
-    assert.equal(result.reason, 'order-partially-matched', missionId);
-    assert.deepEqual(result.targetMismatches, [mismatch], missionId);
-    assert.equal(result.prompt, prompt, missionId);
-    assert.deepEqual([result.world.drink, result.world.size, result.world.service], missionId === 'C02'
-      ? ['latte', null, 'to-go'] : ['latte', 'large', null],
-      `${missionId} should retain facts that match the visible order`);
+    assert.equal(result.reason, 'order-updated', missionId);
+    assert.deepEqual([result.world.drink, result.world.size, result.world.service], actual, missionId);
+    assert.deepEqual(result.world.target, initial.target, 'retain the suggested order as context');
+    assert.equal(result.world.stage, 'handover', missionId);
+    assert.equal(result.comparison.targetMatches, false, 'reference mismatch is factual but does not block service');
+    assert.equal(result.comparison.orderReady, true, missionId);
+    assert.equal(result.comparison.deliveryMatches, true, missionId);
+    assert.doesNotMatch(result.prompt, /check|correct|task says/i);
     assert.equal(result.world.revision, 1, missionId);
-    assert.deepEqual(result.world.appliedEventIds, [`${missionId}-wrong-target`], missionId);
+    assert.deepEqual(result.world.appliedEventIds, [`${missionId}-guest-choice`], missionId);
   }
 });
 
-test('an explicit correction cannot change a target-order field away from its visible target', () => {
+test('an explicit change away from the suggested order updates only the requested field', () => {
   const ordered = Coffee.advanceMission(Coffee.missionInitial('C02'), 'A small latte to go, please.').world;
   const result = Coffee.advanceMission(ordered, 'Actually, make that a large.');
-  assert.equal(result.accepted, false);
-  assert.equal(result.reason, 'target-mismatch');
-  assert.deepEqual(result.targetMismatches, [{ field: 'size', expected: 'small', actual: 'large' }]);
-  assert.equal(result.prompt, 'Please check the order. What size should it be?');
-  assert.deepEqual([result.world.drink, result.world.size, result.world.service], ['latte', 'small', 'to-go']);
+  assert.equal(result.accepted, true);
+  assert.equal(result.reason, 'order-corrected');
+  assert.deepEqual(result.corrections, [{ field: 'size', from: 'small', to: 'large' }]);
+  assert.deepEqual([result.world.drink, result.world.size, result.world.service], ['latte', 'large', 'to-go']);
   assert.equal(result.world.stage, 'handover');
-  assert.equal(result.world.revision, ordered.revision);
+  assert.equal(result.world.revision, ordered.revision + 1);
+  assert.match(result.prompt, /large latte to go/);
+  assert.equal(ordered.size, 'small', 'previous order is immutable');
 });
 
-test('a pure target mismatch stays unconfirmed and does not mutate the mission', () => {
+test('a drink different from the teaching reference becomes the actual order', () => {
   const initial = Coffee.missionInitial('C04', 'C04-large-americano-here');
   const result = Coffee.advanceMission(initial, 'Latte.');
-  assert.equal(result.accepted, false);
-  assert.equal(result.reason, 'target-mismatch');
-  assert.equal(result.prompt, 'Please check the order. What drink should it be?');
-  assert.deepEqual([result.world.drink, result.world.size, result.world.service], [null, null, null]);
-  assert.equal(result.world.revision, 0);
+  assert.equal(result.accepted, true);
+  assert.equal(result.reason, 'order-updated');
+  assert.equal(result.prompt, 'Would you like a small or a large latte?');
+  assert.deepEqual([result.world.drink, result.world.size, result.world.service], ['latte', null, null]);
+  assert.equal(result.world.revision, 1);
+  assert.equal(initial.drink, null);
 });
 
-test('C04 large americano to-go retries only the wrong service and then completes in order', () => {
+test('C04 serves a for-here americano even when the teaching reference suggests to-go', () => {
   let world = Coffee.missionInitial('C04', 'C04-large-americano-to-go');
-
   let result = Coffee.advanceMission(world, 'An americano, please.');
   assert.equal(result.accepted, true);
   world = result.world;
   assert.equal(Coffee.nextMissionStep(world).taskId, 'coffee-size');
   assert.equal(Coffee.nextPrompt(world), 'Would you like a small or a large americano?');
-
   result = Coffee.advanceMission(world, 'Large, please.');
   assert.equal(result.accepted, true);
   world = result.world;
   assert.equal(Coffee.nextMissionStep(world).taskId, 'coffee-service');
-  assert.equal(Coffee.nextPrompt(world), 'Is that for here or to go?');
-
   result = Coffee.advanceMission(world, 'For here.');
-  assert.equal(result.accepted, false);
-  assert.equal(result.reason, 'target-mismatch');
-  assert.equal(result.prompt, 'Please check the order. Is it for here or to go?');
-  assert.deepEqual([result.world.drink, result.world.size, result.world.service], ['americano', 'large', null]);
-  assert.equal(Coffee.nextMissionStep(result.world).taskId, 'coffee-service');
-
-  result = Coffee.advanceMission(result.world, 'To go, please.');
   assert.equal(result.accepted, true);
   world = result.world;
+  assert.deepEqual([world.drink, world.size, world.service], ['americano', 'large', 'here']);
   assert.equal(Coffee.nextMissionStep(world).taskId, 'coffee-thanks');
-  assert.equal(Coffee.nextPrompt(world), 'Here’s your large americano to go. Enjoy!');
-
+  assert.equal(Coffee.nextPrompt(world), 'Here’s your large americano for here. Enjoy!');
   result = Coffee.advanceMission(world, 'Thank you.');
   assert.equal(result.accepted, true);
   assert.equal(result.world.stage, 'complete');
@@ -255,7 +248,7 @@ test('help, questions, negated choices and ambiguous alternatives never mutate a
     ['I do not want a latte.', 'no-decision', null],
     ["I don't want a latte or an americano.", 'no-decision', null],
     ["I don't want small or large.", 'no-decision', null],
-    ['Yes, please.', 'no-decision', null],
+    ['Yes, please.', 'conversation-repair', null],
   ]) {
     const result = Coffee.advanceMission(initial, utterance);
     assert.equal(result.accepted, false, utterance);
@@ -272,12 +265,15 @@ test('a vague yes and a Chinese meta-question cannot answer the pending C01 size
   assert.equal(drink.nextStep.taskId, 'coffee-size');
   assert.equal(drink.prompt, 'Would you like a small or a large americano?');
 
-  const yes = Coffee.advanceMission(drink.world, 'Yes.');
+  const yes = Coffee.advanceMission(drink.world, 'Yes.', { question: drink.prompt });
   assert.equal(yes.accepted, false);
-  assert.equal(yes.reason, 'no-decision');
+  assert.equal(yes.reason, 'conversation-repair');
   assert.equal(yes.world.revision, drink.world.revision);
   assert.equal(yes.world.size, null);
-  assert.equal(yes.prompt, 'Would you like a small or a large americano?');
+  assert.equal(yes.prompt, 'Would you like a small americano?');
+  const confirmed = Coffee.advanceMission(yes.world, 'Yes.', { question: yes.prompt });
+  assert.equal(confirmed.accepted, true);
+  assert.equal(confirmed.world.size, 'small');
 
   const metaQuestion = Coffee.advanceMission(drink.world, '这问题你问过了吗？');
   assert.equal(metaQuestion.accepted, false);
@@ -356,7 +352,7 @@ test('independent variants use fixed allowed facts and never accept invented val
   assert.deepEqual(sanitized.target, { drink: 'americano', size: 'large', service: 'here' }, 'target is catalog data, not caller data');
   const resumedMismatch = Coffee.normalizeMissionWorld({ ...state, drink: 'americano', size: 'large', service: 'to-go', received: true });
   assert.deepEqual([resumedMismatch.drink, resumedMismatch.size, resumedMismatch.service, resumedMismatch.received],
-    ['americano', 'large', null, false], 'stale conflicting progress reopens only the changed target field');
+    ['americano', 'large', 'to-go', true], 'a valid actual order survives normalization even if the reference differs');
   const forgedRepair = Coffee.normalizeMissionWorld({ ...Coffee.missionInitial('C03'), repair: { resolved: true } });
   assert.equal(forgedRepair.stage, 'repair', 'a flag alone cannot invent a corrected delivery');
   let result = Coffee.advanceMission(state, 'A medium mocha with oat milk, please.');
@@ -366,7 +362,8 @@ test('independent variants use fixed allowed facts and never accept invented val
   assert.equal(result.accepted, true);
   assert.equal(result.world.stage, 'handover');
   assert.equal(Coffee.compareOrder(result.world).targetMatches, true);
-  assert.match(Coffee.missionFacts(result.world), /Mission: C04\/C04-large-americano-here.*Stage: handover/);
+  assert.match(Coffee.missionFacts(result.world), /Confirmed order: large americano here.*Stage: handover/);
+  assert.doesNotMatch(Coffee.missionFacts(result.world), /Target:|Mission: C04/, 'barista context does not expose the teaching reference as a rule');
 });
 
 test('mission turns are immutable, revision checked and replay safe', () => {
@@ -437,13 +434,19 @@ test('backend does not grade a help question or let model output skip a coffee s
   assert.equal(skipped.responses[0].payload.choice, null);
 });
 
-test('backend cannot turn a bare yes into a coffee choice through model scoring', async () => {
+test('backend rejects yes to two choices and accepts yes to an actual single offer locally', async () => {
   const h = feedbackHarness({ sceneId: 'coffee', taskId: 'coffee-order', coffee: Coffee.initial(),
-    question: 'Would you like a latte?', answer: 'Yes, please.' }, { meaning_valid: true, choice: 'latte' }, true);
+    question: 'Would you like a latte or an americano?', answer: 'Yes, please.' }, { meaning_valid: true, choice: 'latte' }, true);
   await h.run();
   assert.equal(h.responses[0].payload.meaning_valid, false);
   assert.equal(h.responses[0].payload.choice, null);
   assert.equal(h.requests.length, 0);
+  const offered = feedbackHarness({ sceneId: 'coffee', taskId: 'coffee-order', coffee: Coffee.initial(),
+    question: 'Would you like a latte?', answer: 'Yes, please.' });
+  await offered.run();
+  assert.equal(offered.responses[0].payload.meaning_valid, true);
+  assert.equal(offered.responses[0].payload.choice, 'latte');
+  assert.equal(offered.requests.length, 0);
 });
 
 test('backend includes coffee state and constrains a natural choice to the current step', async () => {

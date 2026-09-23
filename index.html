@@ -12,7 +12,7 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%237965df'/%3E%3Cpath d='M19 17h8v23h18v7H19z' fill='white'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/regular/style.css" />
     <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/fill/style.css" />
-    <link rel="stylesheet" href="./styles.css?v=20260923-world-loop1" />
+    <link rel="stylesheet" href="./styles.css?v=20260923-free-dialogue2" />
   </head>
   <body>
     <div class="app-frame" id="appFrame">
@@ -104,48 +104,46 @@
         <section class="view view-growth" data-view="growth" aria-label="学习笔记">
           <div class="view-scroll page-scroll footprints-scroll learning-notes-scroll">
             <header class="page-header learning-notes-header">
-              <h1 id="learningNotesTitle">把学过的，再用一次</h1>
+              <span class="notes-eyebrow">MY ENGLISH LIFE</span>
+              <h1 id="learningNotesTitle">学习笔记</h1>
+              <p>把生活里用过的英语，慢慢变成自己的。</p>
             </header>
 
-            <section class="world-evidence notes-section" aria-labelledby="worldEvidenceTitle">
-              <div class="section-title notes-section-title"><h2 id="worldEvidenceTitle">我现在能做到的</h2></div>
-              <div id="worldEvidenceList"><p class="history-empty">先完成一件生活小事。这里会记下你怎样把意思说清楚。</p></div>
-            </section>
-
-            <section class="notes-section achievement-section" aria-labelledby="achievementTitle">
-              <div class="section-title notes-section-title"><h2 id="achievementTitle">学习成果</h2></div>
-              <div class="achievement-grid">
-                <article><i class="ph ph-check-circle" aria-hidden="true"></i><strong id="achievementCompleted">0</strong><span>完成场景</span></article>
-                <article><i class="ph ph-waveform" aria-hidden="true"></i><strong id="achievementIndependent">0</strong><span>独立说出</span></article>
-                <article><i class="ph ph-chat-circle" aria-hidden="true"></i><strong id="achievementTargets">0</strong><span>独立表达项</span></article>
-                <article><i class="ph ph-arrows-split" aria-hidden="true"></i><strong id="achievementTransfer">0</strong><span>换场景用出</span></article>
-              </div>
-              <p class="achievement-note"><i class="ph ph-info" aria-hidden="true"></i>这些是练习证据，不代表语言掌握率。</p>
-            </section>
-
             <section class="review-overview" aria-labelledby="reviewOverviewTitle">
-              <h2 id="reviewOverviewTitle">还没有到期的复习</h2>
-              <p id="reviewOverviewCopy">完成一段真实对话后，这里会安排合适的再次练习。</p>
-              <div class="review-queue-list" id="reviewQueueList" aria-live="polite">
-                <article class="notes-placeholder-row">
-                  <span class="notes-row-icon"><i class="ph ph-chat-circle-dots" aria-hidden="true"></i></span>
-                  <div><strong>先留下一次真实回应</strong><p>看过提示与自己说出，会分别记录。</p></div>
-                </article>
+              <div class="notes-review-topline"><span id="notesReviewEyebrow">从一件小事开始</span><span id="notesReviewCount" hidden></span></div>
+              <div class="notes-review-scene">
+                <div><span id="notesReviewScene">街角咖啡店</span><h2 id="reviewOverviewTitle">点一杯喜欢的咖啡</h2></div>
+                <img id="notesReviewImage" src="./assets/optimized/coffee-home-720.jpg" alt="" aria-hidden="true">
               </div>
-              <button class="notes-primary-action" id="startReview" type="button"><span data-learning-label>开始第一段练习</span></button>
+              <p id="reviewOverviewCopy">和 Mia 打声招呼，试着点一杯咖啡。</p>
+              <button class="notes-primary-action" id="startReview" type="button"><span data-learning-label>开始第一段练习</span><i class="ph ph-arrow-right" aria-hidden="true"></i></button>
+              <div class="review-queue-list" id="reviewQueueList" aria-live="polite"></div>
             </section>
 
-            <section class="notes-section practice-again-section" aria-labelledby="practiceAgainTitle">
-              <div class="section-title notes-section-title"><h2 id="practiceAgainTitle">还要多练</h2><em id="strengthCount">0 项</em></div>
-              <div class="strength-list" id="strengthList" aria-live="polite">
-                <article class="notes-empty-card"><i class="ph ph-plant" aria-hidden="true"></i><div><strong>还没有需要整理的内容</strong><p>练习后会显示使用过帮助、借助中文或尚待再次确认的表达。</p></div></article>
-              </div>
+            <section class="world-evidence notes-section" id="worldEvidenceSection" aria-labelledby="worldEvidenceTitle" hidden>
+              <div class="section-title notes-section-title"><h2 id="worldEvidenceTitle">一个小进步</h2><i class="ph ph-sparkle" aria-hidden="true"></i></div>
+              <div id="worldEvidenceList"></div>
             </section>
 
-            <section class="learning-history-section notes-section" aria-labelledby="recentLearningTitle">
-              <div class="section-title notes-section-title"><h2 id="recentLearningTitle">最近记录</h2><em>最近 5 次</em></div>
-              <div class="learning-history" id="learningHistory"><p class="history-empty">还没有练习记录。</p></div>
-            </section>
+            <details class="notes-fold practice-again-section" id="notesPracticeFold" hidden>
+              <summary><span class="notes-fold-icon"><i class="ph ph-plant" aria-hidden="true"></i></span><span><strong id="practiceAgainTitle">想再练练</strong><small>需要时，回到熟悉的场景</small></span><em id="strengthCount">0 项</em><i class="ph ph-caret-down" aria-hidden="true"></i></summary>
+              <div class="strength-list" id="strengthList" aria-live="polite"></div>
+            </details>
+
+            <details class="notes-fold learning-history-section" id="notesHistoryFold">
+              <summary><span class="notes-fold-icon"><i class="ph ph-notebook" aria-hidden="true"></i></span><span><strong id="recentLearningTitle">练习足迹</strong><small id="notesHistorySummary">每一次开口，都留在这里</small></span><i class="ph ph-caret-down" aria-hidden="true"></i></summary>
+              <div class="notes-history-content">
+                <div class="achievement-grid" aria-label="练习记录汇总">
+                  <article><strong id="achievementCompleted">0</strong><span>完成场景</span></article>
+                  <article><strong id="achievementIndependent">0</strong><span>独立表达次数</span></article>
+                  <article><strong id="achievementTargets">0</strong><span>独立表达项</span></article>
+                  <article><strong id="achievementTransfer">0</strong><span>换场景用出</span></article>
+                </div>
+                <p class="notes-history-label">最近 5 次练习</p>
+                <div class="learning-history" id="learningHistory"><p class="history-empty">开始一段对话，就会留下第一条足迹。</p></div>
+                <details class="notes-evidence-history" id="notesEvidenceHistory" hidden><summary>查看每次表达的记录<i class="ph ph-caret-down" aria-hidden="true"></i></summary><div id="notesEvidenceList"></div></details>
+              </div>
+            </details>
 
             <div class="legacy-learning" hidden aria-hidden="true">
               <div id="abilityOrbit"><span id="abilityPercent"></span></div><h2 id="abilityTitle"></h2><p id="abilityDescription"></p>
@@ -206,7 +204,7 @@
                 <span id="missionHudCode">任务 C01</span><strong id="missionHudTitle">第一次自己点咖啡</strong><em id="missionHudProgress">1 / 4</em>
               </div>
               <p data-visual-caption></p><strong data-visual-order></strong>
-              <div class="order-slots" id="orderSlots" hidden aria-label="订单进度">
+              <div class="order-slots" id="orderSlots" hidden aria-label="你的点单">
                 <span data-order-slot="drink">饮品</span><span data-order-slot="size">杯型</span><span data-order-slot="service">方式</span>
               </div>
             </section>
@@ -249,7 +247,7 @@
                 </div>
               </div>
             </section>
-            <header class="experience-topbar"><button type="button" id="exitScene" aria-label="退出情境"><i class="ph ph-arrow-left"></i></button><div class="scene-top-status"><span id="learningStageLabel" class="learning-stage-label">先听懂</span><div class="scene-step" id="sceneProgress" role="progressbar" aria-label="场景学习进度" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"><span id="stepFill"></span></div></div><div class="mode-pill" id="modePill"><span class="mode-dot"></span><span id="modeLabel">准备开始</span></div><button class="subtitle-toggle" type="button" id="subtitleToggle" aria-label="隐藏字幕" aria-pressed="true" title="隐藏字幕"><i class="ph ph-closed-captioning"></i></button><button type="button" id="resetButton" aria-label="重新开始"><i class="ph ph-arrow-counter-clockwise"></i></button></header>
+            <header class="experience-topbar"><button type="button" id="exitScene" aria-label="退出情境"><i class="ph ph-arrow-left"></i></button><div class="scene-top-status"><span id="learningStageLabel" class="learning-stage-label">生活里的英语对话</span><div class="scene-step" id="sceneProgress" role="progressbar" aria-label="场景学习进度" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"><span id="stepFill"></span></div></div><div class="mode-pill" id="modePill"><span class="mode-dot"></span><span id="modeLabel">准备开始</span></div><button class="subtitle-toggle" type="button" id="subtitleToggle" aria-label="隐藏字幕" aria-pressed="true" title="隐藏字幕"><i class="ph ph-closed-captioning"></i></button><button type="button" id="resetButton" aria-label="重新开始"><i class="ph ph-arrow-counter-clockwise"></i></button><button type="button" id="finishConversation" hidden>结束对话</button></header>
             <div class="action-coach" id="actionCoach" role="status" hidden><i class="ph ph-hand-grabbing" aria-hidden="true"></i><span id="actionCoachText"></span></div>
             <section class="language-panel" id="languagePanel" aria-live="polite" hidden><div class="recent-dialogue" id="recentDialogue"></div></section>
             <button class="dialogue-history-button" id="openDialogueHistory" type="button" aria-controls="dialogueHistory" aria-expanded="false" hidden>全部对话 <i class="ph ph-caret-up" aria-hidden="true"></i></button>
@@ -293,14 +291,14 @@
       </main>
     </div>
     <script src="./breakfast.js?v=20260919-reply-owner2" defer></script>
-    <script src="./coffee.js?v=20260920-natural-dialogue1" defer></script>
+    <script src="./coffee.js?v=20260923-free-dialogue2" defer></script>
     <script src="./scene-visuals.js?v=20260919-reply-owner2" defer></script>
     <script src="./dialogue-rules.js?v=20260920-natural-dialogue1" defer></script>
     <script src="./voice-runtime.js?v=1" defer></script>
     <script src="./learning-evidence.js?v=20260923-world-loop1" defer></script>
     <script src="./world-learning-loop.js?v=20260923-world-loop1" defer></script>
-    <script src="./learning-experience.js?v=20260923-world-loop1" defer></script>
-    <script src="./app.js?v=20260923-world-loop1" defer></script>
+    <script src="./learning-experience.js?v=20260923-free-dialogue2" defer></script>
+    <script src="./app.js?v=20260923-free-dialogue2" defer></script>
     <script src="./breakfast-ui.js?v=20260923-world-loop1" defer></script>
   </body>
 </html>

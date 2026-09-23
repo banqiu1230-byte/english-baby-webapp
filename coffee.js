@@ -114,10 +114,12 @@ const Coffee = (() => {
     return world;
   }
   function choiceFromText(taskId, text, world = initial(), question = '') {
+    const confirmed = confirmationChoice(taskId, text, question, world);
+    if (confirmed) return confirmed;
     if (!isTask(taskId) || isNonDecision(text)) return null;
     const clean = normalize(text).replace(/^(?:can|could) i (?:have|get) /, ''), order = normalizeWorld(world);
-    // Each question offers named options. A bare yes/no never picks one,
-    // including when a server follow-up changes the wording of `question`.
+    // Open choices require a named option. Yes only confirms a specific offer
+    // that was actually asked; it never chooses between two alternatives.
     let choice = null;
     if (taskId === 'coffee-order') {
       const match = clean.match(/^(?:(?:i want|i would like|id like|ill have|i choose) )?(?:a |an )?(latte|americano)(?: coffee)?(?: please| thanks)?$/);
@@ -152,6 +154,87 @@ const Coffee = (() => {
   function facts(world = {}) {
     const order = normalizeWorld(world);
     return `Chosen coffee: ${order.drink || 'not chosen'}. Size: ${order.size || 'not chosen'}. Service: ${order.service || 'not chosen'}. Coffee ready to offer: ${Boolean(order.service)}. Received and thanked: ${order.received}.`;
+  }
+
+  function confirmationOption(taskId, question, world = {}) {
+    // Match a complete, direct offer in the last sentence, not a word mentioned
+    // in an explanation, hypothetical, negative question, or earlier turn.
+    const last = String(question || '').trim().split(/[.!。！]/).filter(s => s.trim()).at(-1) || '';
+    const clean = normalize(last);
+    const order = normalizeWorld(world);
+    if (taskId === 'coffee-order' && !world.drink) {
+      return clean.match(/^(?:would you like|would you prefer|do you want|shall i make you|do you mean) (?:a |an )?(latte|americano)$/)?.[1] || null;
+    }
+    if (taskId === 'coffee-size' && order.drink && !world.size) {
+      const match = clean.match(/^(?:would you like|would you prefer|do you want|do you mean) (?:a )?(small|large)(?: (?:cup|coffee|latte|americano))?$/);
+      if (match && (!/\b(?:latte|americano)\b/.test(clean) || clean.includes(order.drink))) return match[1];
+    }
+    if (taskId === 'coffee-service' && order.size && !world.service) {
+      if (/^(?:is (?:that|it|your order)|do you want (?:it|that)) (?:for )?here$/.test(clean)) return 'here';
+      if (/^(?:is (?:that|it|your order)|do you want (?:it|that)) to go$/.test(clean)) return 'to-go';
+    }
+    return null;
+  }
+
+  function confirmationChoice(taskId, text, question, world = {}) {
+    if (!/^(?:yes|yeah|yep|sure|okay|ok|是的|对|对的|好|好的|可以)(?: please| thanks| thank you)?$/.test(normalize(text))) return null;
+    if (world.stage === 'repair' || world.stage === 'complete') return null;
+    return confirmationOption(taskId, question, world);
+  }
+
+  const unavailableDrinks = /\b(?:cappuccino|espresso|mocha|flat white|tea|juice|hot chocolate)\b|卡布奇诺|浓缩咖啡|摩卡|馥芮白|果汁|热巧克力/;
+
+  function isConversationOnly(text, question = '') {
+    const clean = normalize(text), asked = normalize(question);
+    if (/\b(?:lets (?:just )?(?:talk|chat)|i (?:just )?want to (?:talk|chat)|not ready to order|dont want to order)\b|聊聊天|聊点别的|先不点|不想点单|自由聊/.test(clean)) return true;
+    if (/\b(?:i would like|id like|ill have|i want (?:a |an |small|large|latte|americano)|(?:can|could|may) i (?:have|get|order)|make (?:it|that)|change (?:it|that|my order))\b|我要|我想要|我想点|改成|换成/.test(clean)) return false;
+    if (/\b(?:yesterday|last (?:week|night|time)|used to|i (?:usually|often|always) (?:drink|have)|i (?:drank|had)|my (?:mother|father|friend|sister|brother) (?:likes|drinks|wants))\b|昨天|上周|以前|我经常|我平时/.test(clean)) return true;
+    if (/\b(?:favou?rite|usually|often|do you like|what do you (?:like|prefer)|tell me about|where are you from|how are you)\b/.test(asked)) return true;
+    const directOrderQuestion = /\b(?:would you like|would you prefer|do you want|what can i get|what would you like|what (?:drink|size)|for here or to go)\b/.test(asked);
+    return !directOrderQuestion && /^(?:i (?:like|love|prefer)|my favou?rite)|^我喜欢/.test(clean);
+  }
+
+  function conversationReply(text, world = {}, { question = '' } = {}) {
+    const clean = normalize(text);
+    const step = nextMissionStep(world);
+    if (!step || ['repair', 'handover', 'complete'].includes(step.phase)) return '';
+    const interpretation = extractOrder(text);
+    // A clear supported choice wins over an aside: "No cappuccino, a latte."
+    if (unavailableDrinks.test(clean) && !interpretation.slots.drink) {
+      const named = clean.match(unavailableDrinks)?.[0];
+      const limit = /^(?:i (?:like|love|prefer)|我喜欢)/.test(clean)
+        ? `You like ${named}. We have latte and americano here.`
+        : `Sorry, ${named} isn't available here. We have latte and americano.`;
+      return world.drink || confirmationOption(step.taskId, question, world)
+        ? limit : `${limit} Would you like a latte?`;
+    }
+    if (/\bmenu\b|菜单|价目表/.test(clean)) {
+      return "We don't have a menu here. We have latte and americano.";
+    }
+    if (/^(?:i know|i understand|知道了|我知道)$/.test(clean)) return 'Of course. Take your time.';
+    const affirmative = /^(?:yes|yeah|yep|sure|okay|ok|i know|i understand|是的|对|对的|好|好的|嗯|可以|知道了|我知道)(?: please| thanks| thank you)?$/.test(clean);
+    const negative = /^(?:no|nope|not really|no thank you|no thanks|不要|不是|不|不想要)$/.test(clean);
+    if (!affirmative && !negative) return '';
+    if (confirmationChoice(step.taskId, text, question, world)) return '';
+    const previous = confirmationOption(step.taskId, question, world);
+    if (negative && /would you prefer|do you want it to go/i.test(question)) return 'No problem. Take your time.';
+    if (step.field === 'drink') return previous === 'latte'
+      ? 'Would you prefer an americano?' : 'Would you like a latte?';
+    if (step.field === 'size') return previous === 'small'
+      ? `Would you prefer a large ${world.drink || 'coffee'}?` : `Would you like a small ${world.drink || 'coffee'}?`;
+    return previous === 'here' ? 'Do you want it to go?' : 'Is that for here?';
+  }
+
+  function replyViolatesScene(text) {
+    return String(text || '').split(/[.!?。！？]+/).some(sentence => {
+      const clean = normalize(sentence);
+      const menuClaim = /\b(?:show|bring|give|hand|look|see|read|point)\b.*\bmenu\b|\bmenu (?:is|right|over|here|there)\b|(?:给你|看看|这[里是]|那[里是]|拿|递).*菜单/.test(clean)
+        && !/\b(?:no menu|isnt a menu|is not a menu|dont have a menu|cannot show|cant show)\b|没有菜单|不显示菜单/.test(clean);
+      const unavailableClaim = unavailableDrinks.test(clean)
+        && /\b(?:we have|we serve|we offer|i can (?:make|get|offer)|ill (?:make|get|prepare)|i will (?:make|get|prepare)|here is your|heres your|your .+ is ready|coming right up|okay|got it)\b|给你(?:做|准备)|(?:有|提供|这是你的).*卡布奇诺/.test(clean)
+        && !/\b(?:dont have|do not have|dont serve|cannot|cant|not available|isnt available|is not available|isnt one of)\b|没有|不提供/.test(clean);
+      return menuClaim || unavailableClaim;
+    });
   }
 
   function getMission(missionId) {
@@ -222,8 +305,10 @@ const Coffee = (() => {
       .filter(field => order[field] && order[field] !== target[field])
       .map(field => ({ field, expected: target[field], actual: order[field] })) : [];
     const targetMatches = target ? missing.length === 0 && mismatches.length === 0 : null;
-    const ready = missing.length === 0 && (targetMatches === null || targetMatches);
-    const deliveryReference = target || (ready ? order : null);
+    // The brief is learning context, not a condition of service. Fulfil the
+    // guest's actual order even when it differs from the suggested order.
+    const ready = missing.length === 0;
+    const deliveryReference = ready ? order : null;
     const deliveryMissing = deliveryReference && !delivered
       ? [...ORDER_FIELDS]
       : deliveryReference ? ORDER_FIELDS.filter(field => !delivered[field]) : [];
@@ -234,7 +319,7 @@ const Coffee = (() => {
     return {
       missing,
       mismatches,
-      targetRequired: Boolean(target),
+      targetRequired: mission.kind === 'delivery-repair',
       targetMatches,
       orderReady: ready,
       deliveryMissing,
@@ -251,13 +336,11 @@ const Coffee = (() => {
     const { mission, variant } = spec;
     const base = missionInitial(mission.id, variant.id);
     const target = copyOrder(variant.target);
-    const suppliedOrder = mission.kind === 'delivery-repair' ? cleanOrder(variant.initialOrder) : cleanOrder(value);
-    // Older builds could save a conflicting target-order value as confirmed.
-    // Keep valid progress, but reopen only the fields that disagree with the
-    // current catalog target so a resumed mission cannot jump to the handover.
-    const order = mission.kind === 'target-order' && target
-      ? Object.fromEntries(ORDER_FIELDS.map(field => [field, suppliedOrder[field] === target[field] ? suppliedOrder[field] : null]))
-      : suppliedOrder;
+    const acceptedAsDelivered = mission.kind === 'delivery-repair' && value?.acceptedAsDelivered === true
+      && sameOrder(copyOrder(value.delivered), variant.delivered);
+    const suppliedOrder = mission.kind === 'delivery-repair'
+      ? cleanOrder(acceptedAsDelivered ? value.delivered : variant.initialOrder) : cleanOrder(value);
+    const order = suppliedOrder;
     const savedDelivery = copyOrder(value?.delivered);
     const resolved = mission.kind === 'delivery-repair' && value?.repair?.resolved === true && sameOrder(savedDelivery, target);
     let delivered = mission.kind === 'delivery-repair'
@@ -278,6 +361,7 @@ const Coffee = (() => {
     return {
       ...base,
       ...order,
+      ...(acceptedAsDelivered ? { acceptedAsDelivered: true } : {}),
       received,
       target,
       delivered,
@@ -347,7 +431,9 @@ const Coffee = (() => {
       help, ambiguousFields: [], intendedSlots: {}, observedSlots: {}, language, kind: help ? 'help' : 'empty' };
     if (!clean || help) return empty;
     const politeOrderQuestion = /^(?:(?:hi|hello|hey|good morning|good afternoon|good evening)(?: mia)? )?(?:can|could|may) i (?:have|get|order)\b/.test(clean);
-    const informationQuestion = !politeOrderQuestion && (/[?？]/.test(raw)
+    // A conversational tail does not turn a clear choice into a question.
+    const choiceWithTag = /^(?:for here|to go|small|large|(?:a |an )?(?:latte|americano))[,， ]+(?:you know|okay|ok|please)[?？.!。！]*$/i.test(raw);
+    const informationQuestion = !politeOrderQuestion && !choiceWithTag && (/[?？]/.test(raw)
       || /^(?:what|which|where|why|how|is|are|do|does|can|could|would|should)\b/.test(clean)
       || /(?:吗|是不是|是什么)$/.test(clean));
     if (informationQuestion) return { ...empty, kind: 'question' };
@@ -398,9 +484,9 @@ const Coffee = (() => {
     if (state.stage === 'complete') return { taskId: null, phase: 'complete', field: null };
     if (state.stage === 'repair') return { taskId: 'coffee-size', phase: 'repair', field: state.repair.field };
     if (state.stage === 'handover') return { taskId: 'coffee-thanks', phase: 'handover', field: null };
-    const field = comparison.missing[0] || comparison.mismatches[0]?.field || 'drink';
+    const field = comparison.missing[0];
     const taskIds = { drink: 'coffee-order', size: 'coffee-size', service: 'coffee-service' };
-    return { taskId: taskIds[field], phase: comparison.missing.length ? 'collect' : 'target-correction', field };
+    return { taskId: taskIds[field], phase: 'collect', field };
   }
 
   function nextPrompt(world = {}) {
@@ -416,21 +502,7 @@ const Coffee = (() => {
       if (field === 'size') return `Would you like a small or a large ${state.drink || 'coffee'}?`;
       return 'Is that for here or to go?';
     }
-    const mismatch = comparison.mismatches[0];
-    if (mission.mode === 'independent') return `Please check the ${mismatch.field} and correct it.`;
-    const labels = { drink: 'drink', size: 'size', service: 'for-here or to-go choice' };
-    return `The task says ${mismatch.expected} for the ${labels[mismatch.field]}. Please correct it.`;
-  }
-
-  function targetRetryPrompt(field) {
-    if (field === 'drink') return 'Please check the order. What drink should it be?';
-    if (field === 'size') return 'Please check the order. What size should it be?';
-    return 'Please check the order. Is it for here or to go?';
-  }
-
-  function promptAfterTargetMismatch(world, mismatch) {
-    const step = nextMissionStep(world);
-    return !step?.field || step.field === mismatch.field ? targetRetryPrompt(mismatch.field) : nextPrompt(world);
+    return 'Take your time.';
   }
 
   function missionResult(world, details = {}) {
@@ -455,12 +527,25 @@ const Coffee = (() => {
     if (eventId && state.appliedEventIds.includes(eventId)) return missionResult(state, { handled: true, reason: 'replayed-event' });
     if (Number.isSafeInteger(options.expectedRevision) && options.expectedRevision !== state.revision)
       return missionResult(state, { handled: true, reason: 'stale-state' });
-    const interpretation = extractOrder(text);
+    if (isConversationOnly(text, options.question)) return missionResult(state, { handled: true, reason: 'conversation', prompt: '' });
+    const confirmed = confirmationChoice(nextMissionStep(state)?.taskId, text, options.question, state);
+    const interpretation = extractOrder(confirmed || text);
     if (interpretation.help) return missionResult(state, { handled: true, reason: 'help', help: interpretation.help, interpretation });
     if (interpretation.ambiguousFields.length) return missionResult(state, { handled: true, reason: 'ambiguous', interpretation });
     if (state.stage === 'complete') return missionResult(state, { handled: true, reason: 'already-complete', interpretation });
+    const conversationalReply = !confirmed && conversationReply(text, state, options);
+    if (conversationalReply) return missionResult(state, { handled: true, reason: 'conversation-repair', interpretation, prompt: conversationalReply });
 
     if (state.stage === 'repair') {
+      const acceptsVisibleCup = /^(?:ill keep (?:it|this one)|i will keep (?:it|this one)|(?:this|that|it|large) is (?:fine|okay|ok)|thats (?:fine|okay|ok)|就这杯吧|大杯也可以|这样也可以)$/.test(normalize(text))
+        || (/^(?:yes|yes please|是的|可以)$/.test(normalize(text)) && /is everything (?:okay|ok)$/.test(normalize(options.question)));
+      if (acceptsVisibleCup) {
+        const next = normalizeMissionWorld({ ...state, acceptedAsDelivered: true,
+          revision: state.revision + 1, appliedEventIds: eventIdsWith(state, eventId) });
+        // Accepting the delivered cup is a valid service outcome, not evidence
+        // that the learner practised correcting a wrong size.
+        return missionResult(next, { accepted: true, handled: true, reason: 'delivery-accepted', changedFields: [], interpretation });
+      }
       const comparison = compareOrder(state);
       const needed = comparison.deliveryMismatches;
       const identifiesEveryRepair = needed.length > 0 && needed.every(item => interpretation.slots[item.field] === item.expected);
@@ -489,32 +574,10 @@ const Coffee = (() => {
     const entries = Object.entries(interpretation.slots);
     if (!entries.length) return missionResult(state, { handled: interpretation.gratitude || interpretation.kind !== 'empty',
       reason: interpretation.gratitude ? 'not-ready' : interpretation.kind === 'question' ? 'question' : 'no-decision', interpretation });
-    const targetMismatches = state.target ? entries
-      .filter(([field, value]) => state.target[field] !== value)
-      .map(([field, actual]) => ({ field, expected: state.target[field], actual })) : [];
-    const matchingEntries = targetMismatches.length
-      ? entries.filter(([field, value]) => state.target[field] === value)
-      : entries;
-    const matchingChangedFields = matchingEntries.filter(([field, value]) => state[field] !== value).map(([field]) => field);
-    if (targetMismatches.length && !matchingChangedFields.length) return missionResult(state, {
-      handled: true, reason: 'target-mismatch', targetMismatches, interpretation,
-      prompt: promptAfterTargetMismatch(state, targetMismatches[0]),
-    });
-    if (targetMismatches.length) {
-      const update = Object.fromEntries(matchingEntries);
-      const next = normalizeMissionWorld({ ...state, ...update, received: false,
-        revision: state.revision + 1, appliedEventIds: eventIdsWith(state, eventId) });
-      return missionResult(next, { accepted: true, handled: true, reason: 'order-partially-matched',
-        changedFields: matchingChangedFields, targetMismatches, interpretation,
-        prompt: promptAfterTargetMismatch(next, targetMismatches[0]) });
-    }
-    const comparison = compareOrder(state);
-    const targetCorrections = new Set(comparison.mismatches
-      .filter(item => interpretation.slots[item.field] === item.expected).map(item => item.field));
     const explicitlyAllowed = new Set(Array.isArray(options.allowCorrectionFields) ? options.allowCorrectionFields : []);
     const conflicts = entries.filter(([field, value]) => state[field] && state[field] !== value);
     const blocked = conflicts.filter(([field]) => !interpretation.explicitCorrection
-      && !targetCorrections.has(field) && !explicitlyAllowed.has(field));
+      && !explicitlyAllowed.has(field));
     if (blocked.length) return missionResult(state, { handled: true, reason: 'correction-needs-signal',
       pendingCorrections: blocked.map(([field, value]) => ({ field, from: state[field], to: value })), interpretation });
     const changedFields = entries.filter(([field, value]) => state[field] !== value).map(([field]) => field);
@@ -523,8 +586,11 @@ const Coffee = (() => {
     const update = Object.fromEntries(entries);
     const next = normalizeMissionWorld({ ...state, ...update, received: false,
       revision: state.revision + 1, appliedEventIds: eventIdsWith(state, eventId) });
+    const nextStep = nextMissionStep(next);
+    const partialAcknowledgment = nextStep?.taskId === nextMissionStep(state)?.taskId
+      ? `Got it: ${changedFields.map(field => next[field] === 'here' ? 'for here' : next[field] === 'to-go' ? 'to go' : next[field]).join(', ')}. ${nextPrompt(next)}` : '';
     return missionResult(next, { accepted: true, handled: true, reason: corrections.length ? 'order-corrected' : 'order-updated',
-      changedFields, corrections, interpretation });
+      changedFields, corrections, interpretation, ...(partialAcknowledgment ? { prompt: partialAcknowledgment } : {}) });
   }
 
   function missionComplete(world = {}) {
@@ -537,7 +603,7 @@ const Coffee = (() => {
     if (!state) return 'Unknown coffee mission.';
     const comparison = compareOrder(state);
     const values = order => order ? `${order.size} ${order.drink} ${order.service}` : 'none';
-    return `Mission: ${state.missionId}/${state.variantId}. Mode: ${state.mode}. Confirmed order: ${values(state)}. Target: ${values(state.target)}. Delivered: ${values(state.delivered)}. Stage: ${state.stage}. Missing: ${comparison.missing.join(', ') || 'none'}. Repair required: ${comparison.repairRequired}. Complete: ${missionComplete(state)}.`;
+    return `Mode: ${state.mode}. Confirmed order: ${values(state)}. Delivered: ${values(state.delivered)}. Stage: ${state.stage}. Missing: ${comparison.missing.join(', ') || 'none'}. Repair required: ${comparison.repairRequired}. Complete: ${missionComplete(state)}.`;
   }
 
   // The character may explain an option, but must not claim it was chosen
@@ -590,6 +656,7 @@ const Coffee = (() => {
     tasks, initial, isTask, normalizeWorld, promptFor, isNonDecision, choiceFromText, apply, acknowledgment, facts,
     missions, getMission, missionInitial, normalizeMissionWorld, extractOrder, compareOrder, nextMissionStep,
     nextPrompt, advanceMission, applyMissionTurn: advanceMission, missionComplete, missionFacts, replyContradictsOrder,
+    confirmationChoice, conversationReply, replyViolatesScene, isConversationOnly,
   };
 })();
 if (typeof module !== 'undefined') module.exports = Coffee;

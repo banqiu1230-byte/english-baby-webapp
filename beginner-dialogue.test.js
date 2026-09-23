@@ -40,6 +40,8 @@ test('coffee transition confirms the resolved step without opening the next ques
   const instructions = context.duplexInstructions('coffee-order', false, true,
     ['coffee-order'], 'task-complete', [], undefined, selected);
   assert.ok(instructions.includes('Current task line: Okay. An americano.'));
-  assert.ok(instructions.includes('Do not ask any question, name the next choice, or begin the next goal'));
-  assert.ok(instructions.includes('Bare yes or no is conversational only and never fills drink, size, or service'));
+  assert.ok(instructions.includes('Do not start the next practical goal yourself'));
+  assert.ok(instructions.includes('If the learner asks a question or keeps chatting, answer them naturally'));
+  assert.ok(instructions.includes('A bare yes after an either-or question does not choose an option'));
+  assert.ok(instructions.includes('A yes to that actual single-option question confirms that option'));
 });

@@ -70,6 +70,8 @@ function setup({ sceneId = 'kitchen', storage = memoryStorage(), coffeeJourney =
     'worldChapter', 'worldChapterLabel', 'worldChapterTitle', 'worldChapterReason',
     'worldFocus', 'worldFocusTitle', 'worldFocusReason', 'worldFocusMeaning', 'worldFocusKeyword',
     'worldFocusReveal', 'worldFocusExample', 'worldFocusTry', 'worldAlternative',
+    'worldEvidenceSection', 'worldEvidenceList', 'notesEvidenceList', 'notesEvidenceHistory', 'learningStageLabel',
+    'notesReviewCount', 'notesReviewScene', 'notesReviewEyebrow', 'notesReviewImage', 'notesPracticeFold', 'notesHistorySummary',
   ].map(id => [id, new Element()]));
   const panel = nodes.get('learningHelpPanel');
   const modalParent = new Element(), sceneContent = new Element(), helpButton = new Element();
@@ -646,8 +648,9 @@ test('learning notes render due practice and real support needs without treating
   f.api.complete();
   f.api.render();
 
-  assert.equal(f.nodes.get('reviewOverviewTitle').textContent, '1 项今天适合再练');
-  assert.equal(f.nodes.get('reviewQueueList').children.length, 1);
+  assert.equal(f.nodes.get('reviewOverviewTitle').textContent, '再选一杯喜欢的饮料');
+  assert.equal(f.nodes.get('notesReviewCount').textContent, '1 项待复习');
+  assert.equal(f.nodes.get('reviewQueueList').children.length, 0);
   assert.equal(f.nodes.get('strengthCount').textContent, '1 项');
   assert.equal(f.nodes.get('strengthList').children.length, 1);
   assert.match(f.nodes.get('strengthList').children[0].children[1].children[1].textContent, /意思未确认/);
@@ -688,7 +691,7 @@ test('learning-note achievements count completed experiences, independent produc
   assert.match(f.nodes.get('learningHistory').children[0].children[1].children[1].textContent, /独立表达/);
 });
 
-test('today review previews only two due items before the main action', () => {
+test('today review keeps one concrete activity and summarizes other due items', () => {
   const f = setup();
   const sessionId = f.begin();
   const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
@@ -701,10 +704,10 @@ test('today review previews only two due items before the main action', () => {
   }
   f.api.render();
 
-  assert.equal(f.nodes.get('reviewOverviewTitle').textContent, '4 项今天适合再练');
-  assert.equal(f.nodes.get('reviewQueueList').children.length, 3);
-  assert.equal(f.nodes.get('reviewQueueList').children.filter(child => child.className.includes('learning-note-row')).length, 2);
-  assert.equal(f.nodes.get('reviewQueueList').children[2].textContent, '另外 2 项今天也可以逐项练习。');
+  assert.equal(f.nodes.get('notesReviewCount').textContent, '4 项待复习');
+  assert.equal(f.nodes.get('reviewQueueList').children.length, 1);
+  assert.match(f.nodes.get('reviewQueueList').children[0].textContent, /还可以复习/);
+  assert.equal(f.nodes.get('reviewQueueList').children.filter(child => child.className.includes('learning-note-row')).length, 0);
 });
 
 test('today review bypasses another saved scene and starts at the due target task', () => {
@@ -819,4 +822,62 @@ test('review button falls back to the most recently completed scene when nothing
   f.nodes.get('startReview').dispatch('click');
   assert.equal(f.starts.length, 1);
   assert.equal(f.starts[0].sceneId, 'airport');
+});
+
+
+function notesAttempt(f, { id, day, supportLevel = 0, source = 'voice', language = 'en', outcome = 'success', targetId = 'choose-drink', sceneId = 'coffee', promptModality = 'audio-text' }) {
+  const sessionId = f.api.store.beginSession({ sceneId });
+  return f.api.store.recordAttempt({ id, sessionId, sceneId, taskId: sceneId === 'coffee' ? 'coffee-order' : 'breakfast-drink', targetId,
+    source, language, supportLevel, conditionsTracked: true, promptModality, outcome,
+    at: new Date(Date.now() - day * 86400000).toISOString() });
+}
+
+test('notes do not turn unchanged, less independent, or unknown records into a progress card', () => {
+  for (const pair of [[0, 0], [0, 3], [null, 0], [3, 3]]) {
+    const f = setup();
+    notesAttempt(f, { id: 'before', day: 2, supportLevel: pair[0] });
+    notesAttempt(f, { id: 'after', day: 1, supportLevel: pair[1] });
+    f.api.render();
+    assert.equal(f.nodes.get('worldEvidenceSection').hidden, true, JSON.stringify(pair));
+    assert.equal(f.nodes.get('worldEvidenceList').children.length, 0);
+    assert.equal(f.nodes.get('notesEvidenceList').children.length, 2, 'raw records remain available in collapsed history');
+  }
+});
+
+test('notes show only the newest supported-to-independent improvement, without a mastery claim', () => {
+  const f = setup();
+  notesAttempt(f, { id: 'old-assisted', day: 4, supportLevel: 3 });
+  notesAttempt(f, { id: 'old-free', day: 3 });
+  notesAttempt(f, { id: 'new-assisted', day: 2, targetId: 'choose-size', supportLevel: 3 });
+  notesAttempt(f, { id: 'new-free', day: 1, targetId: 'choose-size' });
+  f.api.render();
+  assert.equal(f.nodes.get('worldEvidenceSection').hidden, false);
+  assert.equal(f.nodes.get('worldEvidenceList').children.length, 1);
+  const card = f.nodes.get('worldEvidenceList').children[0];
+  assert.equal(card.children[0].textContent, '说明想要的杯型');
+  assert.match(card.children[1].children[1].children[1].textContent, /没看答案/);
+  assert.doesNotMatch(card.children[2].textContent, /掌握|学会|百分/);
+});
+
+test('notes suppress stale success when the latest response remains unconfirmed', () => {
+  const f = setup();
+  notesAttempt(f, { id: 'assisted', day: 3, supportLevel: 3 });
+  notesAttempt(f, { id: 'free', day: 2 });
+  notesAttempt(f, { id: 'unconfirmed', day: 1, outcome: 'unconfirmed' });
+  f.api.render();
+  assert.equal(f.nodes.get('worldEvidenceSection').hidden, true);
+});
+
+
+test('conversation header shows the person and place while task indices stay internal', () => {
+  for (const [sceneId, expected] of [['coffee', 'Mia · 街角咖啡店'], ['kitchen', 'Luma · 家中早餐'], ['airport', '工作人员 · 机场'], ['office', '前台 · 初次拜访']]) {
+    const f = setup({ sceneId });
+    f.begin();
+    assert.equal(f.nodes.get('learningStageLabel').textContent, expected);
+    assert.doesNotMatch(f.nodes.get('learningStageLabel').textContent, /\d\s*\/|任务|第.*步/);
+    if (sceneId === 'office') {
+      f.state.taskIndex = 3; f.api.taskStarted();
+      assert.equal(f.nodes.get('learningStageLabel').textContent, 'Maya · 初次拜访');
+    }
+  }
 });

@@ -219,7 +219,7 @@ for (const answer of ['For here.', 'For here, yeah.']) {
   });
 }
 
-test('C01: yes during the active size question requests a real choice instead of guessing', async () => {
+test('C01: yes after either-or changes to a single offer without guessing a size', async () => {
   const h = coffeeHarness(1);
   loadCoffeeProgress(h);
   const send = await connect(h);
@@ -229,7 +229,7 @@ test('C01: yes during the active size question requests a real choice instead of
   assert.equal(h.s.speechDone, false);
   assert.equal(h.s.stage, 'active');
   assert.equal(h.effects.some(effect => effect.type === 'scored'), false);
-  assert.ok(h.effects.some(effect => effect.type === 'spoken' && /small.+large/i.test(effect.text)));
+  assert.ok(h.effects.some(effect => effect.type === 'spoken' && effect.text === 'Would you like a small americano?'));
 });
 
 test('C01: an order reply bound to the old task cannot speak after moving to size', async () => {
@@ -349,4 +349,51 @@ test('a polite You too after handover completes the coffee visit', () => {
   const result = Coffee.advanceMission(ordered, 'You too!');
   assert.equal(result.accepted, true);
   assert.equal(Coffee.missionComplete(result.world), true);
+});
+
+test('a follow-up chat after confirming the drink pauses task advancement and keeps the real reply', async () => {
+  const h = coffeeHarness();
+  h.s.stage = 'task-complete'; h.s.speechDone = true;
+  h.s.characterPromptDelivered = true;
+  h.s.dialogueHistory = [{id:1,speaker:'luma',text:'Okay. An americano.',taskId:'coffee-order'}];
+  h.s.messageSerial = 1;
+  h.c.startTask = index => h.effects.push({type:'advanced',index});
+  h.c.scheduleTaskAdvance(1);
+  const send = await connect(h);
+  await send({type:'conversation.item.input_audio_transcription.completed',item_id:'chat',text:'How is your day?'});
+  assert.equal(h.s.conversationFocus, 'chat');
+  assert.equal(h.s.advanceTimer, null);
+  assert.equal(h.c.transitionReplyReplacement('Good, thanks! How about you?'), '');
+  await h.advance(15000);
+  assert.equal(h.effects.some(e => e.type === 'advanced'), false);
+});
+
+test('chatting about a favourite coffee does not consume the next size step during transition', async () => {
+  const h = coffeeHarness();
+  h.s.stage = 'task-complete'; h.s.speechDone = true;
+  h.s.conversationFocus = 'chat';
+  h.s.activeQuestion = 'What is your favorite coffee?';
+  h.s.dialogueHistory = [{id:1,speaker:'luma',text:h.s.activeQuestion,taskId:'coffee-order'}];
+  h.s.messageSerial = 1;
+  const send = await connect(h);
+  await send({type:'conversation.item.input_audio_transcription.completed',item_id:'preference',text:'A small latte.'});
+  assert.equal(h.s.pendingTransitionUtterance, null);
+  assert.equal(h.s.coffee.drink, 'americano');
+  assert.equal(h.s.coffee.size, null);
+});
+
+test('ordinary coffee conversation never waits on a separate feedback request', async () => {
+  const h = coffeeHarness(1);
+  loadCoffeeProgress(h);
+  let requests = 0;
+  h.c.fetch = async () => { requests++; throw Error('This conversation must not need grading'); };
+  const message = {id:1,speaker:'user',text:'I watched a movie this morning.',revision:1,final:true};
+  h.s.dialogueHistory = [message];
+  await h.c.requestLanguageFeedback(h.s.activeQuestion, message.text, {
+    ...h.c.captureUserTurnContext(), messageId:1,revision:1,final:true,
+  });
+  assert.equal(requests, 0);
+  assert.equal(h.s.conversationFocus, 'chat');
+  assert.equal(h.s.coffee.size, null);
+  assert.equal(h.effects.some(e => e.type === 'spoken' || e.type === 'scored'), false);
 });
