@@ -395,26 +395,56 @@ test('session completion is idempotent and today counts do not carry into anothe
   assert.notEqual(f.store.beginSession({ sceneId: 'kitchen', resumeId: f.sessionId }), f.sessionId);
 });
 
-test('checkpoints restore business state across reload, resume the same session, and take priority over due review', () => {
+test('breakfast checkpoints retain the mission and mode across reload while discarding internal business state', () => {
   const f = setup();
   f.record();
   const checkpoint = f.store.saveCheckpoint({ sessionId: f.sessionId, sceneId: 'kitchen', taskIndex: 1,
     practiceMode: 'guided', breakfast: { drink: 'milk', cupPlaced: false, amount: null },
     coveredGoals: ['breakfast-drink', 'breakfast-drink'], goalRecords: { 'breakfast-drink': { spoke: true, supportLevel: 0 } } });
-  checkpoint.goalRecords['breakfast-drink'].spoke = false;
+  assert.equal(checkpoint.taskIndex, 0);
+  for (const field of ['breakfast', 'coveredGoals', 'goalRecords']) assert.equal(Object.hasOwn(checkpoint, field), false);
+  checkpoint.practiceMode = 'listening';
   f.date(8);
   const restored = Learning.createStore(f.storage, { now: f.now });
-  assert.equal(restored.getCheckpoint().goalRecords['breakfast-drink'].spoke, true);
-  assert.deepEqual(restored.getCheckpoint().coveredGoals, ['breakfast-drink']);
+  assert.equal(restored.getCheckpoint().practiceMode, 'guided', 'returned records cannot mutate stored progress');
+  assert.equal(restored.getCheckpoint().breakfast, undefined);
   assert.equal(restored.nextStep().kind, 'resume');
-  assert.equal(restored.nextStep().taskIndex, 1);
-  assert.equal(restored.beginSession({ sceneId: 'kitchen', resumeId: f.sessionId }), f.sessionId);
-  assert.equal(restored.summary().sessionCount, 1);
-  restored.completeSession({ id: f.sessionId, sceneId: 'kitchen' });
+  assert.equal(restored.nextStep().taskIndex, 0);
+  restored.discardCheckpoint({ sessionId: f.sessionId });
+  const retry = restored.beginSession({ sceneId: 'kitchen' });
+  assert.notEqual(retry, f.sessionId);
+  assert.equal(restored.summary().sessionCount, 2);
+  assert.equal(restored.getProfile().attempts[0].sessionId, f.sessionId, 'restart keeps previous learning evidence');
+  restored.saveCheckpoint({ sessionId: retry, sceneId: 'kitchen', taskIndex: 2 });
+  restored.completeSession({ id: retry, sceneId: 'kitchen' });
   assert.equal(restored.getCheckpoint(), null);
   assert.equal(restored.nextStep().kind, 'review');
   assert.equal(Learning.createStore(f.storage, { now: f.now }).getCheckpoint(), null);
 });
+
+for (const legacy of [false, true]) {
+  test(`${legacy ? 'single' : 'multiple'} old breakfast checkpoint migration restarts the mission and preserves its evidence`, () => {
+    const f = setup();
+    f.record();
+    const profile = f.store.getProfile();
+    const old = { sessionId: f.sessionId, sceneId: 'kitchen', taskIndex: 2, practiceMode: 'listening',
+      at: new Date(f.now()).toISOString(), breakfast: { drink: 'milk', cupPlaced: true, amount: 'more' },
+      coveredGoals: ['breakfast-drink', 'breakfast-cup'], goalRecords: { 'breakfast-cup': { meaningAccepted: true } } };
+    profile.checkpoint = old;
+    if (legacy) delete profile.checkpoints;
+    else profile.checkpoints = [old];
+    f.storage.setItem(Learning.STORAGE_KEY, JSON.stringify(profile));
+    const restored = Learning.createStore(f.storage, { now: f.now });
+    const saved = restored.getCheckpoint();
+    assert.equal(saved.sessionId, f.sessionId);
+    assert.equal(saved.taskIndex, 0);
+    assert.equal(saved.practiceMode, 'listening');
+    for (const field of ['breakfast', 'coveredGoals', 'goalRecords']) assert.equal(Object.hasOwn(saved, field), false);
+    assert.equal(restored.getProfile().attempts.length, 1);
+    assert.equal(restored.summary().independentCount, 1);
+    assert.equal(restored.summary().completedSessions, 0);
+  });
+}
 
 test('starting another scene preserves both checkpoints and completing one clears only its own progress', () => {
   const f = setup();

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const Learning = require('./learning-evidence');
+const WorldLoop = require('./world-learning-loop');
 
 // Exercise the real UI bridge and evidence store without starting speech or a browser.
 const experienceSource = fs.readFileSync(path.join(__dirname, 'learning-experience.js'), 'utf8');
@@ -28,6 +29,13 @@ class Element {
   constructor() {
     this.hidden = false; this.inert = false; this.parentElement = null;
     this.children = []; this.listeners = new Map(); this.selectors = new Map(); this.dataset = {};
+    const classes = new Set();
+    this.classList = {
+      add: (...names) => names.forEach(name => classes.add(name)),
+      remove: (...names) => names.forEach(name => classes.delete(name)),
+      contains: name => classes.has(name),
+      toggle(name, force = !classes.has(name)) { if (force) classes.add(name); else classes.delete(name); return force; },
+    };
   }
   append(...children) {
     for (const child of children) child.parentElement = this;
@@ -40,6 +48,8 @@ class Element {
   querySelectorAll(selector) { return this.selectors.get(selector) || []; }
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
   setAttribute(name, value) { this[name] = value; }
+  getAttribute(name) { return this[name] ?? null; }
+  removeAttribute(name) { delete this[name]; }
   addEventListener(type, callback) {
     if (!this.listeners.has(type)) this.listeners.set(type, []);
     this.listeners.get(type).push(callback);
@@ -48,7 +58,7 @@ class Element {
   focus() {}
 }
 
-function setup({ sceneId = 'kitchen', storage = memoryStorage(), coffeeJourney = null } = {}) {
+function setup({ sceneId = 'kitchen', storage = memoryStorage(), coffeeJourney = null, activeTaskIds = null } = {}) {
   const guidance = new Element();
   const nodes = new Map([
     'learningHelpPanel', 'learningHelpContent', 'reviewSpoken', 'reviewTransferTitle', 'reviewTransferCopy',
@@ -56,7 +66,10 @@ function setup({ sceneId = 'kitchen', storage = memoryStorage(), coffeeJourney =
     'reviewOverviewTitle', 'reviewOverviewCopy', 'startReview', 'reviewQueueList', 'strengthCount',
     'strengthList', 'achievementCompleted', 'achievementIndependent', 'achievementTargets',
     'achievementTransfer', 'learningHistory', 'todayMissionCode', 'adventureJourneyTitle', 'adventureRoute',
-    'chooseCoffeeMission',
+    'chooseCoffeeMission', 'todaySubtitle', 'todayContext', 'todayHero',
+    'worldChapter', 'worldChapterLabel', 'worldChapterTitle', 'worldChapterReason',
+    'worldFocus', 'worldFocusTitle', 'worldFocusReason', 'worldFocusMeaning', 'worldFocusKeyword',
+    'worldFocusReveal', 'worldFocusExample', 'worldFocusTry', 'worldAlternative',
   ].map(id => [id, new Element()]));
   const panel = nodes.get('learningHelpPanel');
   const modalParent = new Element(), sceneContent = new Element(), helpButton = new Element();
@@ -72,9 +85,9 @@ function setup({ sceneId = 'kitchen', storage = memoryStorage(), coffeeJourney =
       : selector === '.journey-switch' ? journeySwitch : selector === '.primary-cta' ? primaryCta : null,
     querySelectorAll: () => [], createElement: () => new Element(),
   });
-  const window = Object.assign(new Element(), { localStorage: storage });
+  const window = Object.assign(new Element(), { localStorage: storage, LumaWorldLoop: WorldLoop });
   helpButton.focus = () => { document.activeElement = helpButton; };
-  const context = vm.createContext({ window, document, LumaLearning: Learning });
+  const context = vm.createContext({ window, document, LumaLearning: Learning, LumaWorldLoop: WorldLoop });
   vm.runInContext(experienceSource, context, { filename: 'learning-experience.js' });
   const api = window.LumaExperience;
   const state = {
@@ -84,14 +97,16 @@ function setup({ sceneId = 'kitchen', storage = memoryStorage(), coffeeJourney =
     coffee: { drink: null, size: null, service: null, received: false },
     coveredGoals: new Set(), sessionGoals: {}, dialogueHistory: [],
   };
-  const task = () => ({ id: sceneTasks[state.selectedScene][state.taskIndex], prompt: 'A short question.' });
-  const starts = [], previews = [], guidanceEvents = [];
+  const taskIds = () => activeTaskIds || sceneTasks[state.selectedScene];
+  const task = () => ({ id: taskIds()[state.taskIndex], prompt: 'A short question.' });
+  const starts = [], previews = [], guidanceEvents = [], selectedMissions = [];
   api.bind({
     state: () => state, task,
     goal: () => state.sessionGoals[task().id] ||= {},
-    taskCount: () => sceneTasks[state.selectedScene].length,
+    taskCount: () => taskIds().length, taskIds,
     start: (nextScene, options) => starts.push({ sceneId: nextScene, options }),
     preview: (nextScene, missionId) => previews.push({ sceneId: nextScene, missionId }),
+    selectCoffeeMission: missionId => { selectedMissions.push(missionId); state.coffeeMissionId = missionId; },
     coffeeJourney: coffeeJourney ? () => coffeeJourney : undefined,
     speak() {}, notify() {},
     pauseGuidance: () => guidanceEvents.push('pause'),
@@ -123,7 +138,7 @@ function setup({ sceneId = 'kitchen', storage = memoryStorage(), coffeeJourney =
       ...overrides,
     };
   }
-  return { api, state, storage, guidance, guidanceEvents, document, window, nodes, journeySwitch, primaryCta, starts, previews, begin, capture };
+  return { api, state, storage, guidance, guidanceEvents, document, window, nodes, journeySwitch, primaryCta, starts, previews, selectedMissions, begin, capture };
 }
 
 test('resuming another scene cannot inherit coffee mission labels or a visible coffee route', () => {
@@ -275,6 +290,27 @@ test('opening dialogue history records transcript exposure without cancelling in
   assert.equal(f.api.store.summary().exposureCount, 1);
 });
 
+for (const [help, exposureKind, productionCondition] of [
+  ['meaning', 'meaning', 'independent'],
+  ['keyword', 'keyword', 'assisted'],
+  ['example', 'full-example', 'assisted'],
+]) {
+  test(`${help} help records its actual effect on listening and speaking`, () => {
+    const f = setup();
+    f.state.practiceMode = 'listening';
+    f.state.subtitlesHidden = true;
+    f.begin();
+    f.api.openHelp(help);
+    f.api.closeHelp();
+    f.api.noteAnswer(f.capture());
+    const attempt = f.api.store.getProfile().attempts[0];
+    assert.ok(attempt.exposureKinds.includes(exposureKind));
+    assert.equal(attempt.productionCondition, productionCondition);
+    if (help === 'meaning') assert.equal(attempt.listeningCondition, 'assisted');
+    assert.equal(f.api.store.summary().completedSessions, 0, 'opening help never completes a mission');
+  });
+}
+
 test('new typed answers are ignored by the voice-only experience bridge', () => {
   const f = setup(); f.begin();
   f.api.noteAnswer(f.capture({ source: 'text', answer: 'Water, please.' }));
@@ -297,7 +333,7 @@ test('a new learner begins the playable coffee journey instead of an unrelated s
   assert.equal(f.starts[0].options.resumeCheckpoint, null);
 });
 
-test('page exit saves a partial task and home passes a restorable checkpoint after reload', () => {
+test('page exit remembers the breakfast mission and mode without saving a partially completed drink', () => {
   const f = setup();
   f.state.practiceMode = 'listening';
   const sessionId = f.begin();
@@ -307,8 +343,9 @@ test('page exit saves a partial task and home passes a restorable checkpoint aft
   f.window.dispatch('pagehide');
   const saved = f.api.store.getCheckpoint();
   assert.equal(saved.taskIndex, 0);
-  assert.equal(saved.breakfast.drink, 'milk');
-  assert.equal(saved.goalRecords['breakfast-drink'].supportLevel, 1);
+  assert.equal(saved.breakfast, undefined);
+  assert.equal(saved.goalRecords, undefined);
+  assert.equal(saved.coveredGoals, undefined);
   assert.equal(f.api.store.summary().completedSessions, 0);
 
   const restored = setup({ storage: f.storage });
@@ -318,13 +355,20 @@ test('page exit saves a partial task and home passes a restorable checkpoint aft
   assert.equal(options.skipIntro, true);
   assert.equal(options.subtitlesHidden, true);
   assert.equal(options.resumeCheckpoint.sessionId, sessionId);
-  assert.deepEqual(options.resumeCheckpoint.breakfast, saved.breakfast);
-  assert.equal(restored.begin(options.resumeCheckpoint), sessionId);
-  assert.equal(restored.api.store.summary().sessionCount, 1);
-  assert.equal(restored.api.supportLevel(), 1);
+  assert.equal(options.resumeCheckpoint.taskIndex, 0);
+  assert.equal(options.resumeCheckpoint.breakfast, undefined);
+  // app.js discards the recovery marker and creates a new attempt when resuming
+  // a whole mission. Old evidence remains, but cannot pre-answer the new one.
+  restored.api.store.discardCheckpoint({ sessionId });
+  const newSession = restored.begin();
+  assert.notEqual(newSession, sessionId);
+  assert.equal(restored.api.store.summary().sessionCount, 2);
+  assert.equal(restored.api.supportLevel(), 0);
+  assert.deepEqual(restored.state.breakfast, { drink: null, cupPlaced: false, amount: null });
+  assert.ok(restored.api.store.getProfile().exposures.some(item => item.sessionId === sessionId));
 });
 
-test('task-complete keeps the next task checkpoint when visibility and pagehide fire', () => {
+test('task-complete and late lifecycle events never turn breakfast recovery into an internal-step save', () => {
   const f = setup(); f.begin();
   f.state.breakfast.drink = 'water';
   f.state.coveredGoals.add('breakfast-drink');
@@ -335,16 +379,16 @@ test('task-complete keeps the next task checkpoint when visibility and pagehide 
   f.document.dispatch('visibilitychange');
   f.window.dispatch('pagehide');
   const saved = f.api.store.getCheckpoint();
-  assert.equal(saved.taskIndex, 1);
-  assert.deepEqual(saved.coveredGoals, ['breakfast-drink']);
-  assert.equal(saved.breakfast.drink, 'water');
+  assert.equal(saved.taskIndex, 0);
+  assert.equal(saved.coveredGoals, undefined);
+  assert.equal(saved.goalRecords, undefined);
+  assert.equal(saved.breakfast, undefined);
   assert.equal(f.api.store.summary().completedSessions, 0);
   const restored = setup({ storage: f.storage });
   restored.api.startHome();
-  assert.equal(restored.starts[0].options.resumeCheckpoint.taskIndex, 1);
-  restored.begin(restored.starts[0].options.resumeCheckpoint);
-  assert.equal(restored.state.taskIndex, 1);
-  assert.equal(restored.state.sessionGoals['breakfast-drink'].meaningAccepted, true);
+  assert.equal(restored.starts[0].options.resumeCheckpoint.taskIndex, 0);
+  assert.equal(restored.starts[0].options.startTaskIndex, 0);
+  assert.equal(restored.starts[0].options.resumeCheckpoint.goalRecords, undefined);
 });
 
 test('completing a session clears recovery and late page lifecycle events do not recreate it', () => {
@@ -362,46 +406,168 @@ test('completing a session clears recovery and late page lifecycle events do not
   assert.equal(setup({ storage: f.storage }).api.store.getCheckpoint(), null);
 });
 
-test('review transfer opens the promised different scene even with other practice due', () => {
-  for (const [sceneId, expected] of [['kitchen', 'coffee'], ['coffee', 'airport'], ['airport', 'office'], ['office', 'kitchen']]) {
-    const f = setup({sceneId}); f.begin();
-    f.state.stage = 'complete'; f.api.complete();
-    f.api.startTransfer({fromReview: true});
-    assert.equal(f.starts[0].sceneId, expected);
-    assert.equal(f.starts[0].options.subtitlesHidden, false);
-  }
-});
-
-test('home and review use the same four-scene progression', () => {
+test('home and review recommend the same bounded coffee and breakfast continuation', () => {
   const rotation = [
-    ['kitchen', 'coffee', '去咖啡店，试着点一杯喜欢的饮品'],
-    ['coffee', 'airport', '去机场，试着回应登机牌请求'],
-    ['airport', 'office', '见一位新同事，试着打招呼'],
-    ['office', 'kitchen', '回到早餐，试着自己作选择'],
+    ['kitchen', 'coffee', '下次出门，再点一杯', 'Milk, please.'],
+    ['coffee', 'kitchen', '回到家，一起准备早餐', 'A latte, please.'],
   ];
-  for (const [sceneId, expected, title] of rotation) {
+  for (const [sceneId, expected, title, answer] of rotation) {
     const f = setup({ sceneId }); f.begin();
+    f.api.noteAnswer(f.capture({ answer }));
     f.state.stage = 'complete'; f.api.complete();
     f.api.renderReview();
     assert.equal(f.nodes.get('reviewTransferTitle').textContent, title);
     f.api.startHome();
     assert.equal(f.starts[0].sceneId, expected);
+    f.api.startTransfer({ fromReview: true });
+    assert.equal(f.starts[1].sceneId, expected);
+    assert.equal(f.starts[0].options.subtitlesHidden, f.starts[1].options.subtitlesHidden);
   }
 });
 
-test('coffee review keeps the learner inside the next quest instead of jumping to the airport', () => {
+test('supported coffee completion recommends an optional lighter-support retry instead of fixed mission advancement', () => {
   const f = setup({ sceneId: 'coffee', coffeeJourney: {
     completed: ['C01'], nextMissionId: 'C02', nextMissionTitle: '替朋友点对那一杯',
   } });
+  f.state.coffeeMissionId = 'C01';
   f.begin();
+  f.api.openHelp('example');
+  f.api.noteAnswer(f.capture({ answer: 'A latte, please.' }));
   f.state.stage = 'complete';
   f.api.complete();
   f.api.renderReview();
-  assert.equal(f.nodes.get('reviewTransferTitle').textContent, '下一关：替朋友点对那一杯');
-  assert.match(f.nodes.get('reviewTransferCopy').textContent, /朋友的目标订单/);
-  assert.equal(f.nodes.get('repeatScene').textContent, '继续任务 C02');
+  assert.equal(f.nodes.get('reviewTransferTitle').textContent, '这一杯，试着少看一点');
+  assert.match(f.nodes.get('reviewTransferCopy').textContent, /随时打开/);
+  assert.equal(f.nodes.get('repeatScene').textContent, '先听着试一次');
+  assert.equal(f.nodes.get('worldAlternative').hidden, false);
   f.api.startHome();
   assert.equal(f.starts[0].sceneId, 'coffee');
+  assert.equal(f.starts[0].options.missionId, 'C01');
+  assert.equal(f.starts[0].options.subtitlesHidden, true);
+  f.nodes.get('worldAlternative').dispatch('click');
+  assert.equal(f.starts[1].sceneId, 'kitchen');
+  assert.equal(f.starts[1].options.subtitlesHidden, false);
+});
+
+function completedFocusFixture() {
+  const f = setup({ sceneId: 'coffee' });
+  f.state.coffeeMissionId = 'C01';
+  f.begin();
+  f.api.openHelp('example');
+  f.api.closeHelp();
+  f.api.noteAnswer(f.capture({ answer: 'A latte, please.' }));
+  f.state.stage = 'complete';
+  f.api.complete();
+  f.api.renderReview();
+  assert.equal(f.nodes.get('worldFocus').hidden, false);
+  return f;
+}
+
+test('optional focus records viewed keyword and example without inventing a practice session or answer', () => {
+  const f = completedFocusFixture();
+  const before = f.api.store.getProfile();
+  assert.equal(before.exposures.filter(item => item.id.includes(':focus:')).length, 0);
+  f.nodes.get('worldFocus').open = true;
+  f.nodes.get('worldFocus').dispatch('toggle');
+  f.nodes.get('worldFocusReveal').dispatch('click');
+  const after = f.api.store.getProfile();
+  assert.equal(after.sessions.length, before.sessions.length);
+  assert.equal(after.attempts.length, before.attempts.length);
+  const studied = after.exposures.filter(item => item.id.includes(':focus:'));
+  assert.deepEqual(studied.map(item => item.kind).sort(), ['full-example', 'keyword']);
+  assert.equal(f.nodes.get('worldFocusExample').hidden, false);
+  assert.match(f.nodes.get('worldFocusExample').textContent, /latte/i);
+  f.nodes.get('worldFocusTry').dispatch('click');
+  assert.equal(f.starts[0].sceneId, 'coffee');
+  assert.equal(f.starts[0].options.missionId, 'C01');
+  assert.equal(f.starts[0].options.subtitlesHidden, false);
+  assert.equal(f.api.store.getProfile().sessions.length, before.sessions.length);
+});
+
+test('a viewed focus example remains assisted after reload and applies only to the next matching encounter', () => {
+  const f = completedFocusFixture();
+  f.nodes.get('worldFocus').open = true;
+  f.nodes.get('worldFocus').dispatch('toggle');
+  f.nodes.get('worldFocusReveal').dispatch('click');
+  const restored = setup({ sceneId: 'coffee', storage: f.storage });
+  restored.state.coffeeMissionId = 'C01';
+  restored.begin();
+  restored.api.noteAnswer(restored.capture({ answer: 'A latte, please.' }));
+  let attempt = restored.api.store.getProfile().attempts.at(-1);
+  assert.equal(attempt.productionCondition, 'assisted');
+  assert.ok(attempt.exposureKinds.includes('full-example'));
+  assert.equal(attempt.supportLevel, 3);
+  restored.state.stage = 'complete';
+  restored.api.complete();
+  restored.begin();
+  restored.api.noteAnswer(restored.capture({ answer: 'An americano, please.' }));
+  attempt = restored.api.store.getProfile().attempts.at(-1);
+  assert.equal(attempt.productionCondition, 'independent', 'previous carried exposure must not recursively become a new study event');
+  assert.equal(attempt.exposureKinds.includes('full-example'), false);
+});
+
+for (const outcome of ['no-answer', 'technical-error']) {
+  test(`focus study survives leaving before a usable target answer (${outcome}) and restarting after reload`, () => {
+    const f = completedFocusFixture();
+    f.nodes.get('worldFocusReveal').dispatch('click');
+    const interrupted = setup({ sceneId: 'coffee', storage: f.storage });
+    interrupted.state.coffeeMissionId = 'C01';
+    const interruptedSession = interrupted.begin();
+    if (outcome === 'technical-error') interrupted.api.noteAnswer(interrupted.capture({ answer: '' }), 'technical-error');
+    interrupted.window.dispatch('pagehide');
+    const profile = interrupted.api.store.getProfile();
+    assert.ok(profile.exposures.some(item => item.sessionId === interruptedSession && item.kind === 'full-example'));
+    assert.equal(profile.attempts.filter(item => item.sessionId === interruptedSession && item.outcome === 'success').length, 0);
+
+    const restored = setup({ sceneId: 'coffee', storage: f.storage });
+    restored.api.startHome();
+    const options = restored.starts[0].options;
+    assert.equal(options.resumeCheckpoint.sessionId, interruptedSession);
+    assert.equal(options.resumeCheckpoint.taskIndex, 0);
+    restored.api.store.discardCheckpoint({ sessionId: interruptedSession });
+    restored.state.coffeeMissionId = options.missionId;
+    const retriedSession = restored.begin();
+    assert.notEqual(retriedSession, interruptedSession);
+    restored.api.noteAnswer(restored.capture({ answer: 'A latte, please.' }));
+    const answer = restored.api.store.getProfile().attempts.at(-1);
+    assert.equal(answer.sessionId, retriedSession);
+    assert.equal(answer.productionCondition, 'assisted');
+    assert.equal(answer.supportLevel, 3);
+    assert.ok(answer.exposureKinds.includes('full-example'));
+  });
+}
+
+test('an unrelated encounter does not consume or inherit focus study for a different capability', () => {
+  const f = completedFocusFixture();
+  f.nodes.get('worldFocusReveal').dispatch('click');
+  const restored = setup({ sceneId: 'airport', storage: f.storage });
+  restored.begin();
+  restored.api.noteAnswer(restored.capture({ answer: 'Here you are.' }));
+  assert.equal(restored.api.store.getProfile().attempts.at(-1).productionCondition, 'independent');
+  restored.state.selectedScene = 'kitchen';
+  restored.begin();
+  restored.api.noteAnswer(restored.capture({ answer: 'Milk, please.' }));
+  const breakfast = restored.api.store.getProfile().attempts.at(-1);
+  assert.equal(breakfast.targetId, 'choose-drink');
+  assert.equal(breakfast.productionCondition, 'assisted');
+  assert.ok(breakfast.exposureKinds.includes('full-example'));
+});
+
+test('a coffee repair mission without a drink-choice task leaves drink study available for its actual retry', () => {
+  const f = completedFocusFixture();
+  f.nodes.get('worldFocusReveal').dispatch('click');
+  const repair = setup({ sceneId: 'coffee', storage: f.storage, activeTaskIds: ['coffee-size', 'coffee-thanks'] });
+  repair.state.coffeeMissionId = 'C03';
+  repair.begin();
+  repair.api.noteAnswer(repair.capture({ answer: 'Small, please.' }));
+  const repaired = repair.api.store.getProfile();
+  assert.equal(repaired.attempts.at(-1).productionCondition, 'independent');
+  assert.equal(repaired.exposures.filter(item => item.id.includes(':carry:')).length, 0);
+  const retry = setup({ sceneId: 'coffee', storage: f.storage });
+  retry.state.coffeeMissionId = 'C01';
+  retry.begin();
+  retry.api.noteAnswer(retry.capture({ answer: 'A latte, please.' }));
+  assert.equal(retry.api.store.getProfile().attempts.at(-1).productionCondition, 'assisted');
 });
 
 test('coffee remembers the selected mission but restarts its dialogue on the next visit', () => {
@@ -566,6 +732,50 @@ test('today review bypasses another saved scene and starts at the due target tas
   assert.equal(f.starts[0].options.missionId, 'C04');
   assert.equal(f.starts[0].options.reviewItems.length, 1);
   assert.equal(f.api.store.getCheckpoint({ sceneId: 'kitchen' }).sessionId, kitchenSession);
+});
+
+test('home continues the remembered mission before due practice while the review entry remains independent', () => {
+  const f = setup({ sceneId: 'kitchen' });
+  const kitchenSession = f.begin();
+  f.state.taskIndex = 2;
+  f.api.checkpoint();
+  const coffeeSession = f.api.store.beginSession({ sceneId: 'coffee', missionId: 'C02' });
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  f.api.store.recordAttempt({
+    id: 'due-coffee-size', sessionId: coffeeSession, sceneId: 'coffee', taskId: 'coffee-size',
+    targetId: 'choose-size', missionId: 'C02', source: 'voice', language: 'en',
+    supportLevel: 2, conditionsTracked: true, promptModality: 'audio-text', outcome: 'success', at: twoDaysAgo,
+  });
+  f.api.renderHome();
+  assert.equal(f.primaryCta.textContent, '继续任务');
+  f.api.startHome();
+  assert.equal(f.starts[0].sceneId, 'kitchen');
+  assert.equal(f.starts[0].options.resumeCheckpoint.sessionId, kitchenSession);
+  assert.equal(f.starts[0].options.startTaskIndex, 0);
+  f.nodes.get('startReview').dispatch('click');
+  assert.equal(f.starts[1].sceneId, 'coffee');
+  assert.equal(f.starts[1].options.reviewTaskId, 'coffee-size');
+  assert.equal(f.starts[1].options.startTaskIndex, 1);
+  assert.equal(f.api.store.getCheckpoint({ sceneId: 'kitchen' }).sessionId, kitchenSession);
+});
+
+test('result continuation consumes the same saved mission as home instead of creating a parallel unfinished attempt', () => {
+  const f = setup({ sceneId: 'kitchen' });
+  const kitchenSession = f.begin();
+  f.api.checkpoint();
+  f.state.selectedScene = 'coffee';
+  f.state.coffeeMissionId = 'C01';
+  f.begin();
+  f.api.noteAnswer(f.capture({ answer: 'A latte, please.' }));
+  f.state.stage = 'complete';
+  f.api.complete();
+  f.api.renderReview();
+  assert.equal(f.nodes.get('repeatScene').textContent, '继续任务');
+  f.api.startTransfer({ fromReview: true });
+  assert.equal(f.starts[0].sceneId, 'kitchen');
+  assert.equal(f.starts[0].options.resumeCheckpoint?.sessionId, kitchenSession);
+  assert.equal(f.starts[0].options.resumeCheckpoint.taskIndex, 0);
+  assert.equal(f.starts[0].options.skipIntro, true);
 });
 
 test('home review action starts at the due target instead of replaying the scene from task one', () => {

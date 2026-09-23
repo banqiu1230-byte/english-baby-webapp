@@ -12,7 +12,7 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%237965df'/%3E%3Cpath d='M19 17h8v23h18v7H19z' fill='white'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/regular/style.css" />
     <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/fill/style.css" />
-    <link rel="stylesheet" href="./styles.css?v=20260920-bubble-meta1" />
+    <link rel="stylesheet" href="./styles.css?v=20260923-world-loop1" />
   </head>
   <body>
     <div class="app-frame" id="appFrame">
@@ -106,6 +106,11 @@
             <header class="page-header learning-notes-header">
               <h1 id="learningNotesTitle">把学过的，再用一次</h1>
             </header>
+
+            <section class="world-evidence notes-section" aria-labelledby="worldEvidenceTitle">
+              <div class="section-title notes-section-title"><h2 id="worldEvidenceTitle">我现在能做到的</h2></div>
+              <div id="worldEvidenceList"><p class="history-empty">先完成一件生活小事。这里会记下你怎样把意思说清楚。</p></div>
+            </section>
 
             <section class="notes-section achievement-section" aria-labelledby="achievementTitle">
               <div class="section-title notes-section-title"><h2 id="achievementTitle">学习成果</h2></div>
@@ -255,7 +260,7 @@
               <button class="learning-help-backdrop" type="button" data-learning-help="close" tabindex="-1" aria-label="关闭帮助"></button>
               <div class="learning-help-sheet">
                 <header><div><span>一点帮助，继续开口</span><h2 id="learningHelpTitle">你想怎么试试？</h2></div><button type="button" data-learning-help="close" aria-label="关闭帮助"><i class="ph ph-x" aria-hidden="true"></i></button></header>
-                <div class="learning-help-options"><button type="button" data-learning-help="meaning"><i class="ph ph-translate" aria-hidden="true"></i>什么意思</button><button type="button" data-learning-help="example"><i class="ph ph-chat-circle" aria-hidden="true"></i>怎么说</button><button type="button" data-learning-help="replay"><i class="ph ph-speaker-high" aria-hidden="true"></i>再听一遍</button></div>
+                <div class="learning-help-options"><button type="button" data-learning-help="replay"><i class="ph ph-speaker-high" aria-hidden="true"></i>再听一遍</button><button type="button" data-learning-help="keyword"><i class="ph ph-key" aria-hidden="true"></i>给个关键词</button><button type="button" data-learning-help="meaning"><i class="ph ph-translate" aria-hidden="true"></i>什么意思</button><button type="button" data-learning-help="example"><i class="ph ph-chat-circle" aria-hidden="true"></i>给我个例子</button></div>
                 <div class="learning-help-content" id="learningHelpContent" aria-live="polite"></div>
               </div>
             </section>
@@ -266,7 +271,7 @@
         <section class="review-screen" id="reviewScreen" aria-label="情境回顾" aria-hidden="true">
           <div class="completion-celebration" id="completionCelebration" aria-hidden="true"></div>
           <div class="review-scroll">
-            <header class="review-hero"><button type="button" id="closeReview" aria-label="关闭回顾"><i class="ph ph-x"></i></button><span class="review-check"><i class="ph-fill ph-check-circle"></i></span><span class="overline">本次练习</span><h1>这次练习，<br /><em>留下了什么？</em></h1><p id="reviewSceneMeta">回顾这次练习的真实记录</p></header>
+            <header class="review-hero"><button type="button" id="closeReview" aria-label="关闭回顾"><i class="ph ph-x"></i></button><span class="review-check"><i class="ph-fill ph-check-circle"></i></span><span class="overline">生活又向前了一点</span><h1>这件小事，<em>办成了。</em></h1><p id="reviewSceneMeta">回顾这次练习的真实记录</p></header>
             <div class="review-body">
               <section class="review-summary"><article><i class="ph ph-ear"></i><strong>完成回应</strong><span id="reviewHeard"></span></article><article><i class="ph ph-chat-circle"></i><strong>自主表达</strong><span id="reviewActions"></span></article><article><i class="ph ph-waveform"></i><strong>英语开口</strong><span id="reviewSpoken"></span></article></section>
               <section class="mission-result" id="missionResult" hidden>
@@ -274,11 +279,16 @@
                 <div><small id="missionResultCode">咖啡店任务 C01</small><h2 id="missionResultTitle">这杯咖啡，点成了</h2><p id="missionResultCopy">你完成了真实点单。下一步是减少帮助，再做一次。</p><div class="mission-result-tags" id="missionResultTags"></div></div>
               </section>
               <section class="review-evidence-list" id="reviewEvidenceList" aria-label="本次学习记录"></section>
+              <section class="transfer-card"><div><i class="ph-fill ph-plant"></i></div><span><small>接下来，可以这样继续</small><strong id="reviewTransferTitle">把这次练过的，再用一次</strong><p id="reviewTransferCopy">复习时，试着用自己的话表达同样的需要。</p></span></section>
+              <details class="world-focus" id="worldFocus" hidden>
+                <summary><span><small>顺手学一点 · 可跳过</small><strong id="worldFocusTitle">把刚才的表达，带到下一次</strong></span><i class="ph ph-plus" aria-hidden="true"></i></summary>
+                <div class="world-focus-content"><p id="worldFocusReason"></p><p id="worldFocusMeaning"></p><p class="world-focus-keyword" id="worldFocusKeyword"></p><button type="button" id="worldFocusReveal" class="world-text-action">看一个完整例子</button><p id="worldFocusExample" class="world-focus-example" hidden></p><button type="button" id="worldFocusTry" class="world-text-action">回到场景试着说</button><small>自己说什么由你决定；回到对话后才记录练习结果。</small></div>
+              </details>
               <section class="recast-card" id="reviewRecast" hidden><span class="overline">你的表达</span><small>你实际说了</small><p id="reviewOriginal"></p><i class="ph ph-arrow-down" id="reviewRecastArrow"></i><small id="reviewRecastLabel">更合适的回应</small><strong id="reviewCorrected"></strong><button type="button" id="playRecast"><i class="ph ph-speaker-high"></i> 听这个表达</button></section>
-              <section class="transfer-card"><div><i class="ph-fill ph-plant"></i></div><span><small>下一次复现</small><strong id="reviewTransferTitle">把这次练过的，再用一次</strong><p id="reviewTransferCopy">复习时，试着用自己的话表达同样的需要。</p></span></section>
-              <button class="review-primary" id="finishReview" type="button">回到今天 <i class="ph ph-arrow-right"></i></button><button class="review-secondary" id="repeatScene" type="button"><i class="ph ph-compass"></i> 换个场景，再试试</button>
+
             </div>
           </div>
+          <footer class="world-review-actions"><button class="review-primary" id="repeatScene" type="button">继续下一件事</button><button class="world-text-action" id="worldAlternative" type="button" hidden>也可以换个地方试试</button><button class="review-secondary" id="finishReview" type="button">今天先到这里</button></footer>
         </section>
       </main>
     </div>
@@ -287,9 +297,10 @@
     <script src="./scene-visuals.js?v=20260919-reply-owner2" defer></script>
     <script src="./dialogue-rules.js?v=20260920-natural-dialogue1" defer></script>
     <script src="./voice-runtime.js?v=1" defer></script>
-    <script src="./learning-evidence.js?v=20260919-mission-save1" defer></script>
-    <script src="./learning-experience.js?v=20260920-task-entry3" defer></script>
-    <script src="./app.js?v=20260920-natural-dialogue1" defer></script>
-    <script src="./breakfast-ui.js?v=20260919-mission-save1" defer></script>
+    <script src="./learning-evidence.js?v=20260923-world-loop1" defer></script>
+    <script src="./world-learning-loop.js?v=20260923-world-loop1" defer></script>
+    <script src="./learning-experience.js?v=20260923-world-loop1" defer></script>
+    <script src="./app.js?v=20260923-world-loop1" defer></script>
+    <script src="./breakfast-ui.js?v=20260923-world-loop1" defer></script>
   </body>
 </html>

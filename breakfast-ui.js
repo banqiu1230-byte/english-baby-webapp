@@ -14,6 +14,7 @@ function showSceneIntroduction(options) {
   clearTimeout(state.completionTimer); state.completionTimer = null;
   reviewScreen.classList.remove('is-active'); reviewScreen.setAttribute('aria-hidden', 'true');
   introOptions = options;
+  state.introduction = options;
   closeSheet();
   state.taskIndex = 0;
   configureScene();
@@ -25,8 +26,8 @@ function showSceneIntroduction(options) {
   else if (state.selectedScene === 'coffee') title.innerHTML = '<span>从一杯咖啡，</span><span>开始攻略生活</span>';
   else title.textContent = SCENES[state.selectedScene].title;
   document.querySelector('.intro-greeting').textContent = state.selectedScene === 'coffee'
-    ? '四个任务，帮助会一点点减少。'
-    : '不用会很多英语，先试着聊聊。';
+    ? '按自己的节奏来，需要帮助随时查看。'
+    : options.encounterChallenge === 'transfer' ? '刚才在咖啡店表达过选择，回到家里再试试。' : '不用会很多英语，先试着聊聊。';
   document.querySelector('#introPerson').textContent = state.selectedScene === 'kitchen' ? 'Luma' : state.selectedScene === 'coffee' ? '店员 Mia' : '对方';
   syncCoffeeMissionBoard();
   sceneIntro.hidden = false;
@@ -37,6 +38,7 @@ function showSceneIntroduction(options) {
 }
 
 function hideSceneIntroduction() {
+  state.introduction = null;
   sceneIntro.hidden = true;
   scene.classList.remove('is-intro', 'is-coffee-intro');
   for (const child of scene.children) child.inert = false;
@@ -132,9 +134,15 @@ document.querySelector('#introReady').addEventListener('click', () => {
     missionId,
     variantId: state.coffeeVariantId || null,
     resumeCheckpoint: sameMission ? introOptions.resumeCheckpoint : null,
-    subtitlesHidden: missionId === 'C04' || (sameMission && Boolean(introOptions.subtitlesHidden)),
+    subtitlesHidden: introOptions.explicitMode && missionId === introOptions.missionId
+      ? Boolean(introOptions.subtitlesHidden)
+      : missionId === 'C04' || (sameMission && Boolean(introOptions.subtitlesHidden)),
     skipIntro: true,
   } : { ...introOptions, subtitlesHidden: Boolean(introOptions.subtitlesHidden), skipIntro: true };
+  if (isCoffee && introOptions.missionId && missionId !== introOptions.missionId) {
+    Object.assign(options, { encounterChallenge: options.subtitlesHidden ? 'independent' : 'guided',
+      reviewTaskId: null, reviewTargetIds: [], reviewItems: [], startTaskIndex: 0 });
+  }
   hideSceneIntroduction(); startScene(options);
 });
 document.querySelector('#introBack').addEventListener('click', () => { hideSceneIntroduction(); leaveScene(); primaryCta.focus(); });

@@ -505,7 +505,7 @@ async function serveStatic(request, response, url) {
   let pathname;
   try { pathname = decodeURIComponent(url.pathname); } catch { return sendJson(response, 400, { error: 'invalid_path' }); }
   if (pathname === '/') pathname = '/index.html';
-  const publicFiles = new Set(['/index.html', '/app.js', '/styles.css', '/dialogue-rules.js', '/voice-runtime.js', '/microphone-worklet.js', '/breakfast.js', '/breakfast-ui.js', '/coffee.js', '/scene-visuals.js', '/learning-evidence.js', '/learning-experience.js']);
+  const publicFiles = new Set(['/index.html', '/app.js', '/styles.css', '/dialogue-rules.js', '/voice-runtime.js', '/microphone-worklet.js', '/breakfast.js', '/breakfast-ui.js', '/coffee.js', '/scene-visuals.js', '/learning-evidence.js', '/world-learning-loop.js', '/learning-experience.js']);
   if (!publicFiles.has(pathname) && !pathname.startsWith('/assets/') && !pathname.startsWith('/node_modules/@phosphor-icons/web/src/')) return sendJson(response, 404, { error: 'not_found' });
   if (pathname.split('/').some((part) => part.startsWith('.'))) return sendJson(response, 404, { error: 'not_found' });
   const target = path.resolve(ROOT, `.${pathname}`);

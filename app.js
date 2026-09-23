@@ -501,11 +501,13 @@ function syncCoffeeMissionBoard() {
   const mission = coffeeMissionMeta();
   const variant = (mission.variants || []).find(item => item.id === state.coffeeVariantId) || (mission.variants || [])[0];
   const targetText = variant?.target ? ['size', 'drink', 'service'].map(slot => coffeeSlotLabel(slot, variant.target[slot])).join(' · ') : '';
+  const explicit = state.introduction?.explicitMode && state.introduction.missionId === state.coffeeMissionId;
+  const listening = explicit ? Boolean(state.introduction.subtitlesHidden) : state.coffeeMissionId === 'C04';
   coffeeMissionBrief.textContent = state.coffeeMissionId === 'C04' && targetText
-    ? `本次目标：${targetText}。默认不显示字幕，听不清仍可以主动请求重复。`
-    : mission.brief;
+    ? `本次目标：${targetText}。${listening ? '这次先不看字幕，需要时随时打开。' : '这次保留字幕，需要时可以查看提示。'}`
+    : `${mission.brief}${explicit && listening ? ' 这次先听声音，字幕和提示随时可打开。' : ''}`;
   const readyLabel = document.querySelector('#introReady span');
-  if (readyLabel) readyLabel.textContent = state.coffeeMissionId === 'C04' ? '开始独立挑战' : `开始任务 ${state.coffeeMissionId}`;
+  if (readyLabel) readyLabel.textContent = listening ? '先听着试一次' : `开始任务 ${state.coffeeMissionId}`;
 }
 
 function coffeeOrderState(world = state.coffee) {
@@ -567,12 +569,13 @@ function renderCoffeeMissionResult() {
   missionResult.hidden = !active;
   if (!active) return;
   const mission = coffeeMissionMeta();
-  const goals = Object.values(state.sessionGoals).filter(goal => goal.id !== 'coffee-thanks' && goal.meaningAccepted);
-  const independentVoice = goals.length > 0 && goals.every(goal => goal.spoke && goal.language === 'en' && (goal.supportLevel || 0) === 0);
+  const attempts = globalThis.LumaExperience?.store.getProfile().attempts.filter(item =>
+    item.sessionId === globalThis.LumaExperience.currentSession() && item.outcome === 'success' && item.taskId !== 'coffee-thanks') || [];
+  const independentVoice = attempts.length > 0 && attempts.every(item => item.productionCondition === 'independent');
   document.querySelector('#missionResultCode').textContent = `咖啡店任务 ${state.coffeeMissionId}`;
   document.querySelector('#missionResultTitle').textContent = state.coffeeMissionId === 'C03' ? '错单已经修正' : '这杯咖啡，点成了';
   document.querySelector('#missionResultCopy').textContent = independentVoice
-    ? '关键意思由你用英语语音说清了。下一关会少给一点帮助，看看能不能继续做到。'
+    ? '关键意思由你用英语说清了。可以换个地方，再用一次。'
     : '你完成了这次真实任务；中文或提示都会如实保留，下次可以少借助一点再试。';
   missionResultTags.replaceChildren();
   const order = coffeeOrderState();
@@ -584,6 +587,7 @@ function renderCoffeeMissionResult() {
   evidence.className = independentVoice ? 'is-earned' : '';
   evidence.textContent = independentVoice ? '本次独立英语语音' : '本次完成 · 独立口语待练';
   missionResultTags.append(evidence);
+  if (globalThis.LumaWorldLoop) return;
   const ids = Object.keys(COFFEE_MISSION_UI), next = ids[ids.indexOf(state.coffeeMissionId) + 1];
   repeatSceneButton.innerHTML = next
     ? `<i class="ph ph-arrow-right"></i> 继续任务 ${next}`
@@ -3026,7 +3030,8 @@ function startTask(index, { speakAgain = true } = {}) {
 }
 
 function resetScene({ speakAgain = true, resumeCheckpoint = null, startTaskIndex = 0, reviewTaskId = null } = {}) {
-  const restartCoffeeMission = state.selectedScene === 'coffee' && resumeCheckpoint?.sceneId === 'coffee';
+  const restartCoffeeMission = ['coffee', 'kitchen'].includes(state.selectedScene)
+    && resumeCheckpoint?.sceneId === state.selectedScene;
   state.practiceSession += 1;
   state.pendingTransitionUtterance = null;
   state.pendingFeedback.forEach(controller => controller.abort());
@@ -3103,7 +3108,7 @@ function resetScene({ speakAgain = true, resumeCheckpoint = null, startTaskIndex
 
 function startScene({ subtitlesHidden = false, skipIntro = false, resumeCheckpoint = null,
   startTaskIndex = 0, reviewTaskId = null, reviewTargetIds = [], reviewItems = [],
-  missionId = null, variantId = null } = {}) {
+  missionId = null, variantId = null, explicitMode = false, encounterChallenge = null } = {}) {
   if (state.selectedScene === 'coffee' && missionId && COFFEE_MISSION_UI[missionId]) {
     selectCoffeeMission(missionId);
     if (variantId) state.coffeeVariantId = variantId;
@@ -3115,7 +3120,7 @@ function startScene({ subtitlesHidden = false, skipIntro = false, resumeCheckpoi
   try { introSeen = localStorage.getItem('luma-intro-v1') === 'seen'; } catch {}
   if (!skipIntro && (!introSeen || state.selectedScene === 'coffee')) {
     showSceneIntroduction({ subtitlesHidden, resumeCheckpoint, startTaskIndex, reviewTaskId,
-      reviewTargetIds, reviewItems, missionId, variantId }); return;
+      reviewTargetIds, reviewItems, missionId, variantId, explicitMode, encounterChallenge }); return;
   }
   hideSceneIntroduction();
   claimExclusiveVoiceSession();
@@ -3125,6 +3130,7 @@ function startScene({ subtitlesHidden = false, skipIntro = false, resumeCheckpoi
   state.completionTimer = null;
   state.subtitlesHidden = Boolean(subtitlesHidden);
   state.practiceMode = state.subtitlesHidden ? 'listening' : 'guided';
+  state.encounterChallenge = encounterChallenge || (state.subtitlesHidden ? 'independent' : 'guided');
   state.completionCelebrated = false;
   reviewScreen.classList.remove('is-celebrating');
   completionCelebration.replaceChildren();
@@ -3845,6 +3851,7 @@ document.querySelector('#playRecast').addEventListener('click', () => {
 document.querySelector('#closeReview').addEventListener('click', () => { clearTimeout(state.completionTimer); stopSpeechPlayback(); closeDuplexSession(); reviewScreen.classList.remove('is-active'); reviewScreen.setAttribute('aria-hidden', 'true'); showView('home'); });
 document.querySelector('#finishReview').addEventListener('click', () => { clearTimeout(state.completionTimer); stopSpeechPlayback(); closeDuplexSession(); reviewScreen.classList.remove('is-active'); reviewScreen.setAttribute('aria-hidden', 'true'); showView('home'); });
 repeatSceneButton.addEventListener('click', () => {
+  if (globalThis.LumaWorldLoop) { globalThis.LumaExperience?.startRecommendation(); return; }
   if (state.selectedScene !== 'coffee') { globalThis.LumaExperience?.startTransfer({ fromReview: true }); return; }
   const ids = Object.keys(COFFEE_MISSION_UI), next = ids[ids.indexOf(state.coffeeMissionId) + 1];
   if (next && coffeeMissionIsUnlocked(next)) selectCoffeeMission(next);
@@ -3874,7 +3881,12 @@ globalThis.LumaVisuals?.bind({ state: () => state, task: currentTask, scene, ima
 globalThis.LumaExperience?.bind({
   state: () => state, task: currentTask, goal: currentGoalRecord,
   taskCount: () => currentSceneConfig().tasks.length,
-  start: (sceneId, options) => { state.selectedScene = sceneId; startScene(options); },
+  taskIds: () => currentSceneConfig().tasks.map(item => item.id),
+  start: (sceneId, options) => {
+    if (state.sceneStarted) leaveScene();
+    state.selectedScene = sceneId; startScene(options);
+  },
+  chooseWorld: () => showView('world'),
   preview: (sceneId, missionId = null) => openSheet(sceneId, null, missionId),
   selectCoffeeMission,
   coffeeJourney: () => {

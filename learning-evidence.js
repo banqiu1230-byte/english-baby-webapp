@@ -174,7 +174,7 @@
     if (!input || typeof input !== 'object') return null;
     const session = sessions.find(item => item.id === input.sessionId && item.sceneId === input.sceneId && !item.completedAt);
     if (!session || !Number.isInteger(input.taskIndex) || input.taskIndex < 0) return null;
-    if (session.sceneId === 'coffee') {
+    if (['coffee', 'kitchen'].includes(session.sceneId)) {
       // A café mission is the recovery unit. Older checkpoints may contain a
       // partly completed order; keep its mission and variant, but restart its
       // dialogue from the first question on the next visit.
@@ -184,8 +184,8 @@
       return {
         sessionId: session.id, sceneId: session.sceneId, taskIndex: 0,
         practiceMode: identifier(input.practiceMode) || session.mode,
-        missionId,
-        variantId: identifier(input.variantId) || identifier(input.coffee?.variantId) || session.variantId,
+        missionId: session.sceneId === 'coffee' ? missionId : null,
+        variantId: session.sceneId === 'coffee' ? (identifier(input.variantId) || identifier(input.coffee?.variantId) || session.variantId) : null,
         at: timestamp(input.at) || fallbackAt,
       };
     }

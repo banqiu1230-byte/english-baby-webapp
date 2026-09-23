@@ -3379,3 +3379,56 @@ html, body { background: #e9e4dd; }
     padding: 12px 15px;
   }
 }
+
+/* Connected life: keep learning reflection outside the scene and actions in reach. */
+.review-screen { display: flex; flex-direction: column; }
+.review-screen .review-scroll { min-height: 0; flex: 1; height: auto; }
+.review-screen .review-hero { padding: max(24px, env(safe-area-inset-top)) 22px 20px; }
+.review-screen .review-check { margin: 0 0 8px; font-size: 30px; }
+.review-screen .review-hero h1, .review-screen .review-hero h1 em { font-size: 26px; font-weight: 600; }
+.review-screen .review-hero p { margin-top: 7px; }
+.review-screen .review-body { padding: 18px 22px 24px; }
+.review-screen .review-summary { display: none; }
+.review-screen .mission-result { margin: 0 0 18px; }
+.review-screen .recast-card { display: none; }
+.world-review-actions { flex: 0 0 auto; display: grid; gap: 4px; padding: 12px 22px max(14px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--paper); }
+.world-review-actions .review-primary { min-height: 50px; margin: 0; border-radius: 25px; font-size: 15px; font-weight: 600; }
+.world-review-actions .review-secondary { min-height: 44px; margin: 0; padding: 10px; border: 0; color: var(--muted); font-size: 13px; font-weight: 500; }
+.world-text-action { min-height: 44px; padding: 10px 4px; border: 0; color: var(--violet-deep); background: transparent; font: inherit; font-size: 13px; cursor: pointer; }
+.world-focus { margin: 18px 0; border-block: 1px solid #e4dccf; }
+.world-focus summary { display: flex; min-height: 68px; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; cursor: pointer; list-style: none; }
+.world-focus summary::-webkit-details-marker { display: none; }
+.world-focus summary small { display: block; margin-bottom: 5px; color: #8a7c6d; font-size: 11px; }
+.world-focus summary strong { color: var(--ink); font-size: 14px; line-height: 1.5; font-weight: 600; }
+.world-focus summary > i { color: var(--violet-deep); font-size: 18px; }
+.world-focus[open] summary > i { transform: rotate(45deg); }
+.world-focus-content { padding-bottom: 16px; }
+.world-focus-content p { margin: 0 0 10px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.world-focus-content .world-focus-keyword { color: var(--violet-deep); font-size: 17px; }
+.world-focus-content .world-focus-example { padding: 13px 15px; border-radius: 14px; background: #eee9f6; color: var(--ink); font-size: 18px; }
+.world-focus-content small { display: block; color: #8a7c6d; font-size: 11px; line-height: 1.6; }
+.world-focus-content .world-text-action { display: block; }
+.world-evidence { margin-bottom: 28px; }
+.world-evidence-card { padding: 16px 0; border-bottom: 1px solid var(--line); }
+.world-evidence-card:first-child { padding-top: 4px; }
+.world-evidence-card h3 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+.world-evidence-card p { margin: 10px 0 0; }
+.world-evidence-card small { display: block; margin-bottom: 3px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.world-evidence-card span { font-size: 13px; line-height: 1.65; }
+.world-evidence-card .world-evidence-note { color: #79704e; font-size: 12px; line-height: 1.6; }
+.learning-help-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.learning-help-options > button { flex-direction: row; gap: 9px; min-height: 52px; border-radius: 14px; }
+@media (max-width: 380px) {
+  .world-review-actions { padding-inline: 18px; }
+  .review-screen .review-body { padding-inline: 18px; }
+  .review-screen .review-hero h1, .review-screen .review-hero h1 em { font-size: 24px; }
+}
+.review-screen .review-hero { padding-top: max(22px, env(safe-area-inset-top)); padding-bottom: 17px; }
+.review-screen .review-check { display: none; }
+.review-screen .review-hero h1 { margin-top: 9px; }
+.review-screen .mission-result { display: block; padding: 0; border: 0; background: transparent; }
+.review-screen .mission-result-mark, .review-screen #missionResultCopy { display: none; }
+.review-screen .mission-result h2 { margin-block: 5px 8px; font-size: 17px; font-weight: 600; }
+.review-screen .mission-result-tags { margin-top: 6px; }
+.review-screen .review-evidence-list { margin-bottom: 12px; }
+.review-screen .transfer-card { margin-top: 0; }
