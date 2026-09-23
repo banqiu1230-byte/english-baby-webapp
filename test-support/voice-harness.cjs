@@ -109,7 +109,7 @@ function harness(overrides = {}) {
     'beginLocalSpeechTurn','clearReplyTimeout','armReplyTimeout','clearCharacterTurnWatchdog',
     'clearUserTurn','stopDuplexPlayback','isDuplexPlaybackActive',
     'isConversationPlaybackActive','isConversationTurnPending','scheduledCharacterLineBlocked',
-    'clearIdleNudge','scheduleIdleNudge','sendDuplex','openLearnerTurn','cleanupSpeechCaptureUi',
+    'clearIdleNudge','clearTaskAdvance','scheduleIdleNudge','sendDuplex','openLearnerTurn','cleanupSpeechCaptureUi',
     'addDialogueMessage','extractDuplexText','showUnplayedCharacterLine','showPendingTaskPrompt',
     'armCharacterTurnWatchdog','connectDuplexSession','settleFailedDuplexTurn',
     'stopSpeechPlayback','updateLearnerTurn','confirmLearnerTurn','syncVoiceStatus','flushMicrophoneBuffer',

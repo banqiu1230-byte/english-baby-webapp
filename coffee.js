@@ -194,7 +194,39 @@ const Coffee = (() => {
     return !directOrderQuestion && /^(?:i (?:like|love|prefer)|my favou?rite)|^我喜欢/.test(clean);
   }
 
+  function reminderOrder(text) {
+    const clean = normalize(text);
+    // A rhetorical reminder affirms the guest's choice. A denial ("I didn't
+    // say small") does not. Keep this narrow so ordinary stories stay chat.
+    if (/\b(?:yesterday|last (?:week|night|time)|used to|usually|often)\b|昨天|上周|上次|以前|经常|平时/.test(clean)) return null;
+    const english = clean.match(/^(?:(?:i|we) (?:have |had )?(?:already )?(?:said|told you|asked for|ordered)|(?:didnt|did not) (?:i|we) (?:already )?(?:say|tell you|ask for|order))\s+(.+)$/);
+    const chinese = clean.match(/^(?:(?:我|我们)?不是(?:已经)?|(?:我|我们)(?:已经|早就)?)(?:说过|说了|告诉过你|告诉你|点过|点的)(.+)$/);
+    let mentioned = english?.[1] || chinese?.[1];
+    if (!mentioned) return null;
+    if (chinese) mentioned = mentioned.replace(/(?:了吗|了么|吗|么|嘛|了)$/, '').replace(/^(?:我要|要|是)/, '');
+    const original = extractOrder(text);
+    const interpretation = original.kind === 'question' ? extractOrder(`I ordered ${mentioned}`) : original;
+    if (interpretation.help || interpretation.ambiguousFields.length || !Object.keys(interpretation.slots).length) return null;
+    // "I said small or large" is still ambiguous, despite the correction cue.
+    if (/\bor\b|还是|或者/.test(mentioned)) return null;
+    return interpretation;
+  }
+
+  function orderReminderReply(text, world = {}) {
+    const state = normalizeMissionWorld(world);
+    if (!state || state.stage === 'repair') return '';
+    const reminder = reminderOrder(text);
+    const entries = reminder && Object.entries(reminder.slots);
+    if (!entries?.length || entries.some(([field, value]) => state[field] !== value)) return '';
+    const facts = entries.map(([field, value]) => field === 'service'
+      ? value === 'here' ? 'for here' : 'to go'
+      : field === 'size' ? `a ${value} cup` : value).join(', ');
+    return `You're right, ${facts}. Sorry, I've got that noted.`;
+  }
+
   function conversationReply(text, world = {}, { question = '' } = {}) {
+    const reminder = orderReminderReply(text, world);
+    if (reminder) return reminder;
     const clean = normalize(text);
     const step = nextMissionStep(world);
     if (!step || ['repair', 'handover', 'complete'].includes(step.phase)) return '';
@@ -527,9 +559,13 @@ const Coffee = (() => {
     if (eventId && state.appliedEventIds.includes(eventId)) return missionResult(state, { handled: true, reason: 'replayed-event' });
     if (Number.isSafeInteger(options.expectedRevision) && options.expectedRevision !== state.revision)
       return missionResult(state, { handled: true, reason: 'stale-state' });
+    const reminder = orderReminderReply(text, state);
+    if (reminder) return missionResult(state, { handled: true, reason: 'order-reminder', prompt: reminder });
     if (isConversationOnly(text, options.question)) return missionResult(state, { handled: true, reason: 'conversation', prompt: '' });
     const confirmed = confirmationChoice(nextMissionStep(state)?.taskId, text, options.question, state);
-    const interpretation = extractOrder(confirmed || text);
+    // A reminder during an actual wrong-cup delivery must correct that delivery,
+    // including rhetorical "Didn't I say small?", instead of merely apologizing.
+    const interpretation = (state.stage === 'repair' && reminderOrder(text)) || extractOrder(confirmed || text);
     if (interpretation.help) return missionResult(state, { handled: true, reason: 'help', help: interpretation.help, interpretation });
     if (interpretation.ambiguousFields.length) return missionResult(state, { handled: true, reason: 'ambiguous', interpretation });
     if (state.stage === 'complete') return missionResult(state, { handled: true, reason: 'already-complete', interpretation });
@@ -656,7 +692,7 @@ const Coffee = (() => {
     tasks, initial, isTask, normalizeWorld, promptFor, isNonDecision, choiceFromText, apply, acknowledgment, facts,
     missions, getMission, missionInitial, normalizeMissionWorld, extractOrder, compareOrder, nextMissionStep,
     nextPrompt, advanceMission, applyMissionTurn: advanceMission, missionComplete, missionFacts, replyContradictsOrder,
-    confirmationChoice, conversationReply, replyViolatesScene, isConversationOnly,
+    confirmationChoice, conversationReply, orderReminderReply, replyViolatesScene, isConversationOnly,
   };
 })();
 if (typeof module !== 'undefined') module.exports = Coffee;

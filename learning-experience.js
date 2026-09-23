@@ -265,6 +265,8 @@
       missionId: item.missionId, variantId: item.variantId, challengeType: item.challengeType,
       promptModality: item.promptModality, conditionsTracked: true,
       retentionCheck: context.retentionCheck,
+      utterance: context.answer,
+      heardQuestion: context.heardQuestion,
       language: language(String(context.answer || '')), supportLevel: support, outcome,
     });
     checkpoint();
@@ -356,41 +358,32 @@
     const coffeeCopy = {
       C01: ['推开门，给自己点一杯', '一杯喜欢的咖啡，堂食或带走。'],
       C02: ['朋友托你带一杯', '小杯拿铁，带走。'],
-      C03: ['这杯好像拿错了', '你要的是小杯。发现不对，就告诉 Mia。'],
-      C04: ['换一张订单，自己来', '先不看字幕，试着独立把这杯点清楚。'],
+      C03: ['拿到的咖啡，好像不太对', '原本点了小杯拿铁带走。可以换一杯，也可以留下这杯。'],
+      C04: ['今天，想喝哪一杯？', '先听听 Mia 怎么说，字幕随时可开。'],
     };
     const missionCopy = coffeeCopy[missionId];
     const title = window.LumaWorldLoop ? next.title : next.kind === 'resume'
-      ? (next.sceneId === 'coffee' ? '继续咖啡店任务' : '接着刚才的，慢慢说就好')
+      ? (missionCopy?.[0] || '接着刚才的，慢慢说就好')
       : next.kind === 'review' ? '还记得吗？今天再试一次'
       : next.kind === 'quest' && missionCopy ? missionCopy[0]
       : scene.title.replace('\n', '');
-    const homeReasons = {
-      resume: '从这件小事的开头继续，也可以重练之前的任务。',
-      review: '隔了一段时间，试试还记得多少。需要时再求助。',
-      retry: next.practiceMode === 'listening' ? '刚才用过帮助。这次先听着回应，字幕随时可开。' : '先按熟悉的方式再试一次，需要时查看帮助。',
-      transfer: '把咖啡店练过的选择，换成牛奶或水再用一次。',
-      return: '建议明天再来试试；现在也可以继续点一杯。',
-      start: '和 Mia 打声招呼，点杯咖啡。一个词也能开始。',
-    };
-    const subtitle = window.LumaWorldLoop ? (homeReasons[next.kind] || next.reason) : next.kind === 'resume'
-      ? (next.sceneId === 'coffee' ? '可从头继续，或重练前面的任务。' : `${scene.label} · 已替你留好进度`)
+    const subtitle = window.LumaWorldLoop ? next.reason : next.kind === 'resume'
+      ? (missionCopy?.[1] || `${scene.label} · 已替你留好进度`)
       : next.kind === 'review' ? '先试着自己说，需要帮助时随时查看。'
       : next.kind === 'quest' && missionCopy ? missionCopy[1]
       : scene.subtitle;
     write('todayTitle', title);
     write('todaySubtitle', subtitle);
     write('todayContext', scene.context);
-    const journeyTitle = next.sceneId === 'coffee' ? '街角的第一杯' : next.sceneId === 'airport' ? '出发前的短练习' : next.sceneId === 'office' ? '工作日短练习' : '熟悉的早晨';
+    const journeyTitle = next.sceneId === 'coffee' ? '街角的第一杯' : next.sceneId === 'airport' ? '出发的这一天' : next.sceneId === 'office' ? '第一次拜访' : '熟悉的早晨';
     write('adventureJourneyTitle', journeyTitle);
     document.querySelector('.journey-switch')?.setAttribute('aria-label', `查看当前旅程：${journeyTitle}`);
-    write('todayMissionCode', `${next.kind === 'resume' ? '继续委托' : next.kind === 'review' ? '再试一次' : '当前委托'}${missionId ? ` · ${missionId}` : ''}`);
+    write('todayMissionCode', next.kind === 'resume' ? '上次的故事' : ['review', 'retry', 'return'].includes(next.kind) ? '再见熟悉的人' : '生活里的下一幕');
     const landmark = document.querySelector('.current-landmark');
-    const isFinalCoffeeMission = next.sceneId === 'coffee' && missionId === 'C04';
-    write('adventureLandmarkLabel', isFinalCoffeeMission ? '当前 · C04 独立挑战' : scene.context);
-    landmark?.classList.toggle('is-current-mission', isFinalCoffeeMission);
+    write('adventureLandmarkLabel', scene.context);
+    landmark?.classList.toggle('is-current-mission', false);
     const landmarkIcon = landmark?.querySelector('i');
-    if (landmarkIcon) landmarkIcon.className = isFinalCoffeeMission ? 'ph-fill ph-flag' : 'ph-fill ph-map-pin';
+    if (landmarkIcon) landmarkIcon.className = 'ph-fill ph-map-pin';
     const route = $('adventureRoute');
     if (route) route.hidden = next.sceneId !== 'coffee';
     if (next.sceneId === 'coffee' && missionId) {
@@ -411,7 +404,7 @@
     const cta = document.querySelector('.primary-cta');
     if (cta) {
       const questAction = { C01: '进去点一杯', C02: '帮朋友带一杯', C03: '去处理这次错单', C04: '开始独立挑战' }[missionId];
-      const label = next.kind === 'resume' ? (next.sceneId === 'coffee' ? '继续任务' : '继续刚才的委托') : next.kind === 'review' ? '再试一次' : next.kind === 'quest' ? (questAction || '继续这段经历') : next.kind === 'transfer' ? '去下一段生活' : '开始这件事';
+      const label = next.kind === 'resume' ? '继续这件事' : next.kind === 'review' ? '再去一趟' : next.kind === 'quest' ? (questAction || '继续这段经历') : next.kind === 'transfer' ? '去下一段生活' : '开始这件事';
       cta.textContent = next.actionLabel || label;
       cta.dataset.openScene = next.sceneId || 'kitchen';
     }
@@ -663,23 +656,27 @@
   }
 
   function renderReview() {
-    const attempts = store.getProfile().attempts.filter(a => a.sessionId === sessionId && a.outcome === 'success');
+    const sessionAttempts = store.getProfile().attempts.filter(a => a.sessionId === sessionId);
+    const attempts = sessionAttempts.filter(a => a.outcome === 'success');
     const voice = attempts.filter(englishVoice), free = voice.filter(independent);
     write('reviewSceneMeta', `${SCENES[s().selectedScene]?.label || '场景练习'} · 这一段完成了`);
     write('reviewHeard', `${s().coveredGoals.size} 个生活步骤`);
     write('reviewActions', `${free.length} 次未看答案`);
     write('reviewSpoken', `${voice.length} 次英语开口`);
     if ($('reviewEvidenceList')) { $('reviewEvidenceList').replaceChildren(row(free.length ? `${free.length} 次，没有看答案也表达了意思` : '这次的合作已经完成', free.length ? '下次换个人或物品再试，看看能否继续独立表达。' : voice.length ? '这次借助了帮助。下一次试着少看一点提示。' : '这次还没有留下英语语音证据；下一次可以从一个英语词开始。', 'plant')); }
-    const user = [...s().dialogueHistory].reverse().find(m => m.speaker === 'user' && m.inputSource === 'voice' && language(m.text) === 'en');
-    if ($('reviewRecast')) $('reviewRecast').hidden = !user;
-    if (user) { write('reviewOriginal', user.text); write('reviewCorrected', ''); $('reviewRecastArrow').hidden = true; $('reviewRecastLabel').hidden = true; $('playRecast').hidden = true; }
+    // A recent transcript can still be unconfirmed; only accepted evidence is
+    // eligible for the takeaway below. Avoid a second, unrelated quote card.
+    if ($('reviewRecast')) $('reviewRecast').hidden = true;
+    const takeaway = latestTakeaway(sessionAttempts);
+    if (takeaway && $('reviewEvidenceList')) $('reviewEvidenceList').replaceChildren(takeawayCard(takeaway));
     if (window.LumaWorldLoop) {
       const profile = store.getProfile();
       reviewPlan = window.LumaWorldLoop.plan(profile, { checkpoint: store.getCheckpoint(),
         completedMissions: adapter?.coffeeJourney?.()?.completed || [] });
       const facts = window.LumaWorldLoop.summary(profile, { sessionId });
-      if ($('reviewEvidenceList')) $('reviewEvidenceList').replaceChildren(
-        row('这次怎样完成的', facts.lines.join('；'), 'plant'));
+      if ($('reviewEvidenceList')) $('reviewEvidenceList').replaceChildren(takeaway
+        ? takeawayCard(takeaway)
+        : row('这次怎样完成的', facts.lines.join('；'), 'plant'));
       write('reviewTransferTitle', reviewPlan.title);
       write('reviewTransferCopy', reviewPlan.reason);
       write('repeatScene', reviewPlan.actionLabel);
@@ -734,6 +731,32 @@
     return helps.length ? `借助${helps.join('、')}完成` : '完成交流，帮助条件尚未确认';
   }
 
+  function latestTakeaway(attempts) {
+    const latestByTarget = new Map();
+    for (const attempt of [...attempts].filter(item => item.outcome !== 'technical-error' && Date.parse(item.at) <= Date.now()).sort(byEvidenceTime)) {
+      latestByTarget.set(attempt.targetId, attempt);
+    }
+    return [...latestByTarget.values()].filter(item => englishVoice(item) && typeof item.utterance === 'string' && item.utterance.trim())
+      .sort(byEvidenceTime).at(-1) || null;
+  }
+
+  function takeawayCard(attempt) {
+    const card = document.createElement('article'); card.className = 'world-evidence-card learning-takeaway';
+    const title = document.createElement('h3'); title.textContent = targetLabel(attempt.targetId);
+    card.append(title);
+    const quote = (label, text, className) => {
+      const block = document.createElement('div'); block.className = `takeaway-quote ${className}`;
+      const meta = document.createElement('small'), value = document.createElement('p');
+      meta.textContent = label; value.textContent = text; block.append(meta, value); card.append(block);
+    };
+    if (typeof attempt.heardQuestion === 'string' && attempt.heardQuestion.trim()) quote('对方说', attempt.heardQuestion, 'takeaway-question');
+    quote('你回应', attempt.utterance, 'takeaway-answer');
+    const condition = document.createElement('p'); condition.className = 'world-evidence-note';
+    condition.textContent = `${shortDate(attempt.at)} · ${evidenceCondition(attempt)}`;
+    card.append(condition);
+    return card;
+  }
+
   function renderWorldEvidence(profile) {
     const container = $('worldEvidenceList');
     if (!container) return;
@@ -762,11 +785,15 @@
       if (note) changes.push({ targetId, latest, previous, before, after, note });
     }
     changes.sort((a, b) => byEvidenceTime(b.latest, a.latest));
-    const change = changes[0];
-    if ($('worldEvidenceSection')) $('worldEvidenceSection').hidden = !change;
+    const takeaway = latestTakeaway(attempts);
+    const change = takeaway ? changes.find(item => item.latest.id === takeaway.id) : changes[0];
+    if ($('worldEvidenceSection')) $('worldEvidenceSection').hidden = !change && !takeaway;
+    write('worldEvidenceTitle', takeaway ? '这句英语，你用上了' : '一个小进步');
     container.replaceChildren();
+    const quoteCard = takeaway ? takeawayCard(takeaway) : null;
+    if (quoteCard) container.append(quoteCard);
     if (change) {
-      const card = document.createElement('article'); card.className = 'world-evidence-card';
+      const card = quoteCard || document.createElement('article'); card.className = quoteCard ? card.className : 'world-evidence-card';
       const title = document.createElement('h3'); title.textContent = targetLabel(change.targetId);
       const comparison = document.createElement('div'); comparison.className = 'notes-progress-comparison';
       for (const [label, text, item] of [['上次', change.before, change.previous], ['这次', change.after, change.latest]]) {
@@ -774,7 +801,9 @@
         meta.textContent = `${label} · ${shortDate(item.at)}`; value.textContent = text; line.append(meta, value); comparison.append(line);
       }
       const note = document.createElement('p'); note.className = 'world-evidence-note'; note.textContent = change.note;
-      card.append(title, comparison, note); container.append(card);
+      if (!quoteCard) card.append(title);
+      card.append(comparison, note);
+      if (!quoteCard) container.append(card);
     }
     const history = $('notesEvidenceList');
     if (history) {

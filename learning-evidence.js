@@ -140,6 +140,12 @@
   const independentProduction = attempt => attempt.productionCondition === 'independent';
   const independentListening = attempt => attempt.listeningCondition === 'independent';
 
+  // Quotes are optional evidence from a captured turn, never reconstructed
+  // from a task template. Keep older records usable without inventing quotes.
+  const capturedText = value => typeof value === 'string'
+    ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, 500) || null
+    : null;
+
   function cleanAttempt(input, sessions, exposures, fallbackAt) {
     if (!input || typeof input !== 'object') return null;
     const id = identifier(input.id), sessionId = identifier(input.sessionId);
@@ -159,6 +165,8 @@
       promptModality: enumValue(promptModalities, input.promptModality, session.promptModality),
       source: input.source,
       language: enumValue(languages, input.language),
+      utterance: input.source === 'voice' ? capturedText(input.utterance) : null,
+      heardQuestion: input.source === 'voice' ? capturedText(input.heardQuestion) : null,
       // Zero is a caller attestation that support was tracked throughout the task.
       // Missing or invalid support must never become independent evidence.
       supportLevel: [0, 1, 2, 3].includes(input.supportLevel) ? input.supportLevel : null,

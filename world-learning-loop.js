@@ -59,10 +59,34 @@
       optional: true, available: true, targetIds: [], ...copy, ...extra };
   }
 
+  function experience(sceneId, source = {}) {
+    if (sceneId !== 'coffee') return {
+      kitchen: { title: '一起准备早餐，喝点什么？', reason: '牛奶和水已经摆好，和 Luma 聊聊这个早晨。' },
+      airport: { title: '到了机场，先找工作人员', reason: '准备好登机牌，聊聊行李和登机口。' },
+      office: { title: '第一次来，和新同事打个招呼', reason: '告诉前台你来找谁，再和 Maya 认识一下。' },
+    }[sceneId] || { title: '接着上次的故事', reason: '按自己的节奏，继续这段经历。' };
+    const meta = missionMetadata('coffee', source);
+    const mission = Coffee?.getMission(meta.missionId);
+    const variant = mission?.variants.find(item => item.id === meta.variantId);
+    if (meta.missionId === 'C03') {
+      const original = variant?.initialOrder;
+      const cup = original?.size === 'large' ? '大杯' : '小杯';
+      const drink = original?.drink === 'americano' ? '美式' : '拿铁';
+      const service = original?.service === 'here' ? '在店里喝' : '带走';
+      return { title: '拿到的咖啡，好像不太对',
+        reason: `你原本点了${cup}${drink}，${service}。可以换杯，也可以留下这杯。` };
+    }
+    return {
+      C01: { title: '推开门，给自己点一杯', reason: '和 Mia 打声招呼，点杯喜欢的咖啡。' },
+      C02: { title: '朋友托你带一杯咖啡', reason: '朋友想要小杯拿铁带走。有变化，直接告诉 Mia 就好。' },
+      C04: { title: '今天，想喝哪一杯？', reason: '先听听 Mia 怎么说。想看字幕，随时打开。' },
+    }[meta.missionId];
+  }
+
   function transfer() {
     return suggestion('transfer', 'kitchen', {}, {
       title: '回到家，一起准备早餐',
-      reason: '换个人、换成牛奶或水，再试着表达你想喝什么。需要帮助时随时查看。',
+      reason: '牛奶和水已经摆好，和 Luma 聊聊这个早晨。',
       actionLabel: '去准备早餐',
     }, { targetIds: ['choose-drink'] });
   }
@@ -71,8 +95,7 @@
     const { profile, store, now } = snapshot(input, options.now);
     const checkpoint = Object.hasOwn(options, 'checkpoint') ? options.checkpoint : profile.checkpoint;
     if (checkpoint && SCENES.includes(checkpoint.sceneId)) return suggestion('resume', checkpoint.sceneId, checkpoint, {
-      title: checkpoint.sceneId === 'coffee' ? '继续咖啡店任务' : checkpoint.sceneId === 'kitchen' ? '继续准备早餐' : '继续上次的任务',
-      reason: '已记住当前小任务，从开头重新开始；也可以选择其他任务。', actionLabel: '继续任务',
+      ...experience(checkpoint.sceneId, checkpoint), actionLabel: '继续这件事',
     }, { sessionId: checkpoint.sessionId || null, taskIndex: 0 });
 
     const due = store.getReviewQueue().filter(item => time(item.dueAt) <= now && SCENES.includes(item.lastSceneId))
@@ -80,8 +103,8 @@
     if (due.length) {
       const first = due[0];
       return suggestion('review', first.lastSceneId, { missionId: first.lastMissionId, variantId: first.lastVariantId }, {
-        title: '隔一段时间，再试一次',
-        reason: '今天可以再遇到上次练过的表达。先试着自己说，需要帮助随时查看。', actionLabel: '开始复练',
+        ...experience(first.lastSceneId, { missionId: first.lastMissionId, variantId: first.lastVariantId }),
+        actionLabel: '再去一趟',
       }, { dueAt: first.dueAt, taskId: first.lastTaskId, targetIds: [first.targetId],
         reviewItems: due.map(item => ({ targetId: item.targetId, sceneId: item.lastSceneId, taskId: item.lastTaskId,
           missionId: item.lastMissionId, variantId: item.lastVariantId, dueAt: item.dueAt })) });
@@ -93,8 +116,8 @@
       const recorded = (Array.isArray(options.completedMissions) ? options.completedMissions : []).filter(id => MISSIONS.includes(id));
       return suggestion('start', 'coffee', { missionId: recorded.at(-1) || 'C01' }, {
         title: recorded.length ? '再去咖啡店点一杯' : '推开门，给自己点一杯',
-        reason: recorded.length ? '已保留之前的任务记录；这次开始记录你用了哪些帮助。' : '和 Mia 打个招呼，点一杯喜欢的咖啡。一个词也可以开始。',
-        actionLabel: recorded.length ? '继续任务' : '进去点一杯',
+        reason: recorded.length ? '之前的经历都保留着。和 Mia 打声招呼，看看今天想喝什么。' : '和 Mia 打个招呼，点一杯喜欢的咖啡。一个词也可以开始。',
+        actionLabel: '进去点一杯',
       });
     }
 
@@ -112,19 +135,22 @@
     const successes = profile.attempts.filter(item => item.sessionId === latest.id && item.outcome === 'success');
     const independentChoice = successes.some(item => item.targetId === 'choose-drink' && item.productionCondition === 'independent');
     const knownProduction = successes.some(item => ['independent', 'assisted'].includes(item.productionCondition));
+    const repairStory = latest.missionId === 'C03' ? experience('coffee', latest) : null;
     if (!knownProduction) return suggestion('retry', 'coffee', { ...latest, mode: 'guided' }, {
-      title: '先按熟悉的方式，再试一次',
-      reason: '这次的记录还不足以判断独立表达，暂不提高难度。需要帮助时继续查看，也可以去准备早餐。',
-      actionLabel: '再试一次',
+      title: '再去咖啡店坐一会儿',
+      reason: '和 Mia 聊聊，点杯想喝的。需要帮助时随时查看，也可以回家准备早餐。',
+      ...repairStory,
+      actionLabel: '再去一趟',
     }, { targetIds: [...new Set(successes.map(item => item.targetId))], alternative: transfer() });
     // A supported retry is still a completed experience. It must never trap the
     // learner in an endless test, and a transfer remains optional at every point.
     if (independentChoice || latest.mode === 'listening') return transfer();
     const usedHelp = successes.some(item => item.productionCondition === 'assisted' || item.listeningCondition === 'assisted');
     return suggestion('retry', 'coffee', { ...latest, mode: 'listening' }, {
-      title: '这一杯，试着少看一点',
+      title: '今天，再去见见 Mia',
       reason: usedHelp ? '刚才借助了字幕或提示。这次先听着回应，想看时可以随时打开；也可以去准备早餐。'
         : '这次可以先听着回应，想看时可以随时打开字幕；也可以去准备早餐。',
+      ...repairStory,
       actionLabel: '先听着试一次',
     }, { targetIds: [...new Set(successes.map(item => item.targetId))], alternative: transfer() });
   }

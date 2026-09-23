@@ -70,7 +70,8 @@ function setup({ sceneId = 'kitchen', storage = memoryStorage(), coffeeJourney =
     'worldChapter', 'worldChapterLabel', 'worldChapterTitle', 'worldChapterReason',
     'worldFocus', 'worldFocusTitle', 'worldFocusReason', 'worldFocusMeaning', 'worldFocusKeyword',
     'worldFocusReveal', 'worldFocusExample', 'worldFocusTry', 'worldAlternative',
-    'worldEvidenceSection', 'worldEvidenceList', 'notesEvidenceList', 'notesEvidenceHistory', 'learningStageLabel',
+    'worldEvidenceSection', 'worldEvidenceTitle', 'worldEvidenceList', 'notesEvidenceList', 'notesEvidenceHistory', 'learningStageLabel',
+    'reviewEvidenceList', 'reviewRecast',
     'notesReviewCount', 'notesReviewScene', 'notesReviewEyebrow', 'notesReviewImage', 'notesPracticeFold', 'notesHistorySummary',
   ].map(id => [id, new Element()]));
   const panel = nodes.get('learningHelpPanel');
@@ -144,14 +145,14 @@ function setup({ sceneId = 'kitchen', storage = memoryStorage(), coffeeJourney =
 }
 
 test('resuming another scene cannot inherit coffee mission labels or a visible coffee route', () => {
-  for (const [sceneId, title] of [['airport', '出发前的短练习'], ['office', '工作日短练习'], ['kitchen', '熟悉的早晨']]) {
+  for (const [sceneId, title] of [['airport', '出发的这一天'], ['office', '第一次拜访'], ['kitchen', '熟悉的早晨']]) {
     const f = setup({ sceneId });
     f.state.coffeeMissionId = 'C04';
     f.state.coffeeVariantId = 'small-americano-here';
     f.begin(); f.api.checkpoint(); f.api.renderHome();
     assert.equal(f.api.store.getCheckpoint().missionId, null);
     assert.equal(f.api.store.getCheckpoint().variantId, null);
-    assert.equal(f.nodes.get('todayMissionCode').textContent, '继续委托');
+    assert.equal(f.nodes.get('todayMissionCode').textContent, '上次的故事');
     assert.equal(f.nodes.get('adventureJourneyTitle').textContent, title);
     assert.equal(f.journeySwitch['aria-label'], `查看当前旅程：${title}`);
     assert.equal(f.nodes.get('adventureRoute').hidden, true);
@@ -438,7 +439,7 @@ test('supported coffee completion recommends an optional lighter-support retry i
   f.state.stage = 'complete';
   f.api.complete();
   f.api.renderReview();
-  assert.equal(f.nodes.get('reviewTransferTitle').textContent, '这一杯，试着少看一点');
+  assert.equal(f.nodes.get('reviewTransferTitle').textContent, '今天，再去见见 Mia');
   assert.match(f.nodes.get('reviewTransferCopy').textContent, /随时打开/);
   assert.equal(f.nodes.get('repeatScene').textContent, '先听着试一次');
   assert.equal(f.nodes.get('worldAlternative').hidden, false);
@@ -592,7 +593,7 @@ test('coffee remembers the selected mission but restarts its dialogue on the nex
 
   const restored = setup({ sceneId: 'coffee', storage: f.storage });
   restored.api.renderHome();
-  assert.equal(restored.primaryCta.textContent, '继续任务');
+  assert.equal(restored.primaryCta.textContent, '继续这件事');
   assert.equal(restored.nodes.get('chooseCoffeeMission').hidden, false);
   restored.api.startHome();
   const { sceneId, options } = restored.starts[0];
@@ -750,7 +751,7 @@ test('home continues the remembered mission before due practice while the review
     supportLevel: 2, conditionsTracked: true, promptModality: 'audio-text', outcome: 'success', at: twoDaysAgo,
   });
   f.api.renderHome();
-  assert.equal(f.primaryCta.textContent, '继续任务');
+  assert.equal(f.primaryCta.textContent, '继续这件事');
   f.api.startHome();
   assert.equal(f.starts[0].sceneId, 'kitchen');
   assert.equal(f.starts[0].options.resumeCheckpoint.sessionId, kitchenSession);
@@ -773,7 +774,7 @@ test('result continuation consumes the same saved mission as home instead of cre
   f.state.stage = 'complete';
   f.api.complete();
   f.api.renderReview();
-  assert.equal(f.nodes.get('repeatScene').textContent, '继续任务');
+  assert.equal(f.nodes.get('repeatScene').textContent, '继续这件事');
   f.api.startTransfer({ fromReview: true });
   assert.equal(f.starts[0].sceneId, 'kitchen');
   assert.equal(f.starts[0].options.resumeCheckpoint?.sessionId, kitchenSession);
@@ -825,10 +826,10 @@ test('review button falls back to the most recently completed scene when nothing
 });
 
 
-function notesAttempt(f, { id, day, supportLevel = 0, source = 'voice', language = 'en', outcome = 'success', targetId = 'choose-drink', sceneId = 'coffee', promptModality = 'audio-text' }) {
+function notesAttempt(f, { id, day, supportLevel = 0, source = 'voice', language = 'en', outcome = 'success', targetId = 'choose-drink', sceneId = 'coffee', promptModality = 'audio-text', utterance, heardQuestion }) {
   const sessionId = f.api.store.beginSession({ sceneId });
   return f.api.store.recordAttempt({ id, sessionId, sceneId, taskId: sceneId === 'coffee' ? 'coffee-order' : 'breakfast-drink', targetId,
-    source, language, supportLevel, conditionsTracked: true, promptModality, outcome,
+    source, language, supportLevel, conditionsTracked: true, promptModality, outcome, utterance, heardQuestion,
     at: new Date(Date.now() - day * 86400000).toISOString() });
 }
 
@@ -866,6 +867,80 @@ test('notes suppress stale success when the latest response remains unconfirmed'
   notesAttempt(f, { id: 'unconfirmed', day: 1, outcome: 'unconfirmed' });
   f.api.render();
   assert.equal(f.nodes.get('worldEvidenceSection').hidden, true);
+});
+
+const renderedText = node => [node.textContent || '', ...node.children.map(renderedText)].join(' ');
+
+test('one notes takeaway preserves the exact heard line and successful voice reply', () => {
+  const f = setup();
+  notesAttempt(f, { id: 'phrase', day: 1, utterance: 'A latte, please.', heardQuestion: 'What would you like today?' });
+  f.api.render();
+  const cards = f.nodes.get('worldEvidenceList').children;
+  assert.equal(cards.length, 1);
+  assert.equal(f.nodes.get('worldEvidenceTitle').textContent, '这句英语，你用上了');
+  assert.match(renderedText(cards[0]), /What would you like today\?/);
+  assert.match(renderedText(cards[0]), /A latte, please\./);
+  assert.doesNotMatch(renderedText(cards[0]), /掌握|学会了|听懂了/);
+});
+
+test('a reply with missing heard evidence never receives a reconstructed question', () => {
+  const f = setup();
+  notesAttempt(f, { id: 'phrase', day: 1, utterance: 'Small, please.', targetId: 'choose-size', supportLevel: null });
+  f.api.render();
+  const text = renderedText(f.nodes.get('worldEvidenceList'));
+  assert.match(text, /Small, please\./);
+  assert.match(text, /帮助条件尚未确认/);
+  assert.doesNotMatch(text, /对方说|Would you|无字幕|未看答案/);
+});
+
+test('unconfirmed or typed utterances cannot become the latest spoken takeaway', () => {
+  for (const invalid of [{ outcome: 'unconfirmed' }, { source: 'text' }, { language: 'zh' }]) {
+    const f = setup();
+    notesAttempt(f, { id: 'before', day: 2, utterance: 'A latte, please.' });
+    notesAttempt(f, { id: 'later', day: 1, utterance: 'This is not a confirmed spoken response.', ...invalid });
+    f.api.render();
+    assert.equal(f.nodes.get('worldEvidenceSection').hidden, true);
+  }
+});
+
+test('the evidence bridge stores exact captured dialogue, never its scripted question fallback', () => {
+  const f = setup({ sceneId: 'coffee' });
+  f.begin();
+  f.api.noteAnswer(f.capture({ answer: 'An americano, please.', heardQuestion: 'What can I get you?', question: 'Scripted fallback.' }));
+  let attempt = f.api.store.getProfile().attempts.at(-1);
+  assert.equal(attempt.utterance, 'An americano, please.');
+  assert.equal(attempt.heardQuestion, 'What can I get you?');
+  f.api.noteAnswer(f.capture({ answer: 'Latte.', question: 'Scripted fallback.' }));
+  attempt = f.api.store.getProfile().attempts.at(-1);
+  assert.equal(attempt.heardQuestion, null);
+});
+
+test('completion shows one real response and its actual support condition', () => {
+  const f = setup({ sceneId: 'coffee' });
+  f.begin();
+  f.api.noteHelp(3, 'example');
+  f.api.noteAnswer(f.capture({ answer: 'A latte, please.', heardQuestion: 'What would you like?' }));
+  f.api.renderReview();
+  const text = renderedText(f.nodes.get('reviewEvidenceList'));
+  assert.match(text, /What would you like\?/);
+  assert.match(text, /A latte, please\./);
+  assert.match(text, /完整示范/);
+  assert.doesNotMatch(text, /未看答案|独立用出|掌握/);
+  assert.equal(f.nodes.get('reviewRecast').hidden, true);
+});
+
+test('home resumes the saved life encounter without exposing its internal mission code', () => {
+  const f = setup({ sceneId: 'coffee' });
+  f.state.coffeeMissionId = 'C03'; f.state.coffeeVariantId = 'C03-wrong-large';
+  f.begin(); f.api.renderHome();
+  assert.equal(f.nodes.get('todayTitle').textContent, '拿到的咖啡，好像不太对');
+  assert.match(f.nodes.get('todaySubtitle').textContent, /小杯拿铁.*带走.*留下这杯/);
+  assert.doesNotMatch(f.nodes.get('todayMissionCode').textContent, /C03|任务|委托/);
+  assert.equal(f.primaryCta.textContent, '继续这件事');
+  assert.equal(f.nodes.get('chooseCoffeeMission').hidden, false);
+  f.api.startHome();
+  assert.equal(f.starts[0].options.missionId, 'C03');
+  assert.equal(f.starts[0].options.skipIntro, true);
 });
 
 

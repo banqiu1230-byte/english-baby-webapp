@@ -149,14 +149,15 @@ mkdirSync(output, { recursive: true });
   }
 
   try {
-    for (const kind of ['fresh', 'resume', 'retry', 'transfer', 'return']) {
+    for (const kind of ['fresh', 'resume', 'resume-repair', 'retry', 'transfer', 'return']) {
       const { page, context } = await fresh(`home-${kind}`);
       if (kind !== 'fresh') await page.evaluate(kind => {
         const sceneId = kind === 'return' ? 'kitchen' : 'coffee';
         const taskId = sceneId === 'kitchen' ? 'breakfast-drink' : 'coffee-order';
         const store = LumaExperience.store;
-        const sessionId = store.beginSession({ sceneId, missionId: sceneId === 'coffee' ? 'C01' : null, mode: 'guided' });
-        if (kind === 'resume') store.saveCheckpoint({ sessionId, sceneId, missionId: 'C01', taskIndex: 0, practiceMode: 'guided' });
+        const missionId = sceneId === 'coffee' ? kind === 'resume-repair' ? 'C03' : 'C01' : null;
+        const sessionId = store.beginSession({ sceneId, missionId, mode: 'guided' });
+        if (kind.startsWith('resume')) store.saveCheckpoint({ sessionId, sceneId, missionId, taskIndex: 0, practiceMode: 'guided' });
         else {
           if (kind === 'retry') store.recordExposure({ id: 'home-fixture-help', sessionId, sceneId, taskId, targetId: 'choose-drink', kind: 'keyword' });
           store.recordAttempt({ id: 'home-fixture-answer', sessionId, sceneId, taskId, targetId: 'choose-drink', source: 'voice', language: 'en', outcome: 'success', supportLevel: kind === 'retry' ? 2 : 0, conditionsTracked: true, promptModality: 'audio-text' });
@@ -164,7 +165,7 @@ mkdirSync(output, { recursive: true });
         }
         LumaExperience.render();
       }, kind);
-      const expected = kind === 'fresh' ? 'start' : kind;
+      const expected = kind === 'fresh' ? 'start' : kind === 'resume-repair' ? 'resume' : kind;
       assert.equal(await page.evaluate(() => LumaWorldLoop.plan(LumaExperience.store.getProfile(), { checkpoint: LumaExperience.store.getCheckpoint() }).kind), expected);
       await homeLayout(page, kind);
       await context.close();
@@ -245,7 +246,7 @@ mkdirSync(output, { recursive: true });
           breakfast: { drink: 'milk', cupPlaced: true, amount: 'more' }, coveredGoals: ['breakfast-drink', 'breakfast-cup'], goalRecords: { 'breakfast-drink': { supportLevel: 3 } } });
         LumaExperience.render();
       });
-      assert.equal(await page.locator('#adventureCta').textContent(), '继续任务');
+      assert.equal(await page.locator('#adventureCta').textContent(), '继续这件事');
       await page.click('#adventureCta');
       await page.waitForFunction(() => state.sceneStarted && state.selectedScene === 'kitchen' && LumaExperience.currentSession());
       const result = await page.evaluate(() => ({ index: state.taskIndex, breakfast: state.breakfast, covered: [...state.coveredGoals], checkpoint: LumaExperience.store.getCheckpoint(), goals: state.sessionGoals }));

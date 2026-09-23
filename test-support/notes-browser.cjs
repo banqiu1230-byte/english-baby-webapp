@@ -24,6 +24,8 @@ mkdirSync(output, { recursive: true });
         const sessionId = store.beginSession({ sceneId, missionId: sceneId === 'coffee' ? 'C01' : null });
         store.recordAttempt({ id, sessionId, sceneId, targetId, taskId: sceneId === 'coffee' ? 'coffee-order' : 'breakfast-drink',
           source: 'voice', language: 'en', conditionsTracked: true, supportLevel: support,
+          utterance: fixture === 'progress' && id === 'latest-drink' ? 'A latte, please.' : null,
+          heardQuestion: fixture === 'progress' && id === 'latest-drink' ? 'What would you like today?' : null,
           challengeType: 'guided', promptModality: 'audio-text', outcome: 'success',
           at: new Date(Date.now() - day * 86400000).toISOString() });
         store.completeSession({ id: sessionId, sceneId });
@@ -38,6 +40,10 @@ mkdirSync(output, { recursive: true });
     await page.click('#bottomNav [data-nav="growth"]');
     await page.waitForFunction(() => getComputedStyle(document.querySelector('.view-growth')).opacity === '1');
     assert.equal(await page.locator('#worldEvidenceSection').isVisible(), fixture === 'progress');
+    if (fixture === 'progress') {
+      assert.equal(await page.locator('.takeaway-question p').textContent(), 'What would you like today?');
+      assert.equal(await page.locator('.takeaway-answer p').textContent(), 'A latte, please.');
+    }
     assert.equal(await page.locator('#notesHistoryFold').getAttribute('open'), null);
     assert.equal(await page.locator('#notesPracticeFold').getAttribute('open'), null);
     for (const [width, height] of [[393, 754], [320, 568], [1146, 1202]]) {

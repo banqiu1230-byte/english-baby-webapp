@@ -18,7 +18,7 @@ function proxy(start = {}) {
     close() { this.closed++; }
     terminate() {} ping() {}
   }
-  const context = vm.createContext({ Buffer, Breakfast: require('./breakfast'), Coffee: require('./coffee'), WebSocket: Socket, crypto: {randomUUID:()=> 'test-id'},
+  const context = vm.createContext({ Buffer, Breakfast: require('./breakfast'), Coffee: require('./coffee'), SceneMemory: require('./scene-memory'), WebSocket: Socket, crypto: {randomUUID:()=> 'test-id'},
     console:{log(){}},process:{env:{DOUBAO_API_KEY:'test-only'}},DUPLEX_URL:'wss://test.invalid',
     duplexInstructions:(...args)=> {instructionCalls.push(args);return 'test';},cleanText: text=>text,
     setTimeout: fn=> {timers.push(fn);return 1;},setInterval:()=>1,clearInterval() {},

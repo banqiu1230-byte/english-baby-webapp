@@ -633,3 +633,29 @@ test('public records are copies and unsupported inputs cannot mutate stored evid
   assert.equal(f.store.recordAttempt(null), null);
   assert.equal(f.store.getProfile().attempts.length, 1);
 });
+
+test('captured speech and actually heard question survive reload, with no template reconstruction', () => {
+  const f = setup();
+  const actual = f.record({ utterance: 'A small latte, please.', heardQuestion: 'What would you like today?' });
+  assert.equal(actual.utterance, 'A small latte, please.');
+  assert.equal(actual.heardQuestion, 'What would you like today?');
+  const restored = Learning.createStore(f.storage, { now: f.now }).getProfile().attempts[0];
+  assert.equal(restored.utterance, actual.utterance);
+  assert.equal(restored.heardQuestion, actual.heardQuestion);
+  const old = f.record({ id: 'old-without-quotes' });
+  assert.equal(old.utterance, null);
+  assert.equal(old.heardQuestion, null);
+});
+
+test('quote evidence is bounded text and cannot come from an action or text-only answer', () => {
+  const f = setup();
+  const spoken = f.record({ utterance: '  Hello\u0000!  ', heardQuestion: 'x'.repeat(900) });
+  assert.equal(spoken.utterance, 'Hello!');
+  assert.equal(spoken.heardQuestion.length, 500);
+  const action = f.record({ id: 'tap-quote', source: 'tap', utterance: 'I said it', heardQuestion: 'Did you?' });
+  assert.equal(action.utterance, null);
+  assert.equal(action.heardQuestion, null);
+  const bad = f.record({ id: 'malformed-quote', utterance: { text: 'No' }, heardQuestion: 3 });
+  assert.equal(bad.utterance, null);
+  assert.equal(bad.heardQuestion, null);
+});

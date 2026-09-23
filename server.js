@@ -8,6 +8,7 @@ const WebSocket = require('ws');
 const Breakfast = require('./breakfast');
 const Coffee = require('./coffee');
 const DialogueRules = require('./dialogue-rules');
+const SceneMemory = require('./scene-memory');
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 4174);
@@ -250,7 +251,9 @@ async function handleLanguageFeedback(request, response) {
   }
 }
 
-function duplexInstructions(taskId, actionDone = false, speechDone = false, coveredGoals = [], flowState = 'active', history = [], breakfast = Breakfast.initial(), coffee = Coffee.initial()) {
+function duplexInstructions(taskId, actionDone = false, speechDone = false, coveredGoals = [], flowState = 'active', history = [], breakfast = Breakfast.initial(), coffee = Coffee.initial(), previousVisit = null) {
+  const remembered = previousVisit && Coffee.isTask(taskId)
+    ? SceneMemory.lastVisit({ version: 1, visits: [previousVisit] }, { before: Date.now() }) : null;
   const scene = DUPLEX_TASKS[taskId] || DUPLEX_TASKS.apple;
   const sceneFacts = Object.values(SCENE_FACTS).find((candidate) => candidate.tasks.has(taskId)) || SCENE_FACTS.kitchen;
   const deliveredCoffee = coffee?.delivered || coffee;
@@ -289,6 +292,7 @@ function duplexInstructions(taskId, actionDone = false, speechDone = false, cove
     'This is a real conversation, not a quiz or a fixed script. The learner’s latest conversational meaning takes priority over the task brief below. Task descriptions are background context, never an instruction to repeat an order question when the learner is chatting.',
     "Use brief everyday greetings and small talk when they fit the learner's words. For example, answer How are you? with I'm good, thanks! How are you? Respond to I'm fine with Glad to hear it. Do not repeat the task question after every greeting or friendly comment. A short warm response can be a complete turn. Do not add a question to every reply or repeatedly steer a friendly conversation back to ordering; let the learner finish their thought.",
     'The app supplies the opening greeting once. Do not restart greetings when a task changes or a session reconnects. Small talk is optional: if the learner gives an order or task answer directly, accept it and continue without making them answer a social question first. Never make up a personal fact, weather, completed action, or order to sound friendly.',
+    remembered ? `Confirmed previous completed visit only: drink=${remembered.order.drink}, size=${remembered.order.size}, service=${remembered.order.service}. These are historical order facts, not a favorite or today's order. Mention them only when relevant, never after every answer. The app handles a return greeting once. Never fill today's drink, size or service from this memory. Ask before repeating an item, respect a new choice or a no, and never infer personal preferences or a name.` : 'No verified previous visit is available. Do not claim to remember a previous visit or a personal preference.',
     'The learner may speak about anything and may take unlimited turns. Always respond to the meaning of their latest utterance.',
     'Assume the learner knows almost no English. Simple means clear meaning with common words, not a word-count limit. Use a complete short question or request so they know what you want. Ask one thing, then wait; do not stack questions.',
     'Prefer present tense and explicit objects: "Do you want milk or water?", "Do you want more milk?", "Is this your bag?" Do not use isolated prompts like "Milk?", "More?", or "Here?" that make a beginner guess your intent. Avoid idioms, phrasal verbs, abstract questions and unnecessary past tense. Say "Give me a cup, please" instead of "Could you pass it to me then".',
@@ -343,6 +347,7 @@ function attachDuplexProxy(client) {
   let history = [];
   let breakfast = Breakfast.initial();
   let coffee = Coffee.initial();
+  let previousVisit = null;
   const updateBreakfast = value => {
     breakfast = { drink: ['milk', 'water'].includes(value?.drink) ? value.drink : null,
       cupPlaced: value?.cupPlaced === true, amount: ['more', 'enough'].includes(value?.amount) ? value.amount : null };
@@ -397,7 +402,7 @@ function attachDuplexProxy(client) {
         type: 'session.create',
         session: {
           model: '1.2.6.1',
-          instructions: duplexInstructions(taskId, actionDone, speechDone, coveredGoals, flowState, history, breakfast, coffee),
+          instructions: duplexInstructions(taskId, actionDone, speechDone, coveredGoals, flowState, history, breakfast, coffee, previousVisit),
           audio: {
             input: { format: { type: 'pcm', sample_rate: 16000 } },
             output: {
@@ -467,6 +472,7 @@ function attachDuplexProxy(client) {
     if (event.type === 'start') {
       updateBreakfast(event.breakfast);
       coffee = normalizeCoffeeState(event.coffee);
+      previousVisit = SceneMemory.lastVisit({ version: 1, visits: [event.previousVisit] }, { before: Date.now() });
       speechRate = ['慢速', '稍慢', '正常'].includes(event.speechRate) ? event.speechRate : '慢速';
       history = Array.isArray(event.history) ? event.history.slice(-12).filter(item => ['user', 'assistant'].includes(item?.role)).map(item => ({ role: item.role, text: cleanText(item.text, '', 500) })) : [];
       taskId = DUPLEX_TASKS[event.taskId] ? event.taskId : 'apple';
@@ -480,6 +486,7 @@ function attachDuplexProxy(client) {
     if (event.type === 'task.update') {
       updateBreakfast(event.breakfast);
       if (event.coffee !== undefined) coffee = normalizeCoffeeState(event.coffee);
+      if (event.previousVisit !== undefined) previousVisit = SceneMemory.lastVisit({ version: 1, visits: [event.previousVisit] }, { before: Date.now() });
       speechRate = ['慢速', '稍慢', '正常'].includes(event.speechRate) ? event.speechRate : speechRate;
       taskId = DUPLEX_TASKS[event.taskId] ? event.taskId : taskId;
       actionDone = Boolean(event.actionDone);
@@ -490,7 +497,7 @@ function attachDuplexProxy(client) {
         type: 'session.update',
         session: {
           model: '1.2.6.1',
-          instructions: duplexInstructions(taskId, actionDone, speechDone, coveredGoals, flowState, history, breakfast, coffee),
+          instructions: duplexInstructions(taskId, actionDone, speechDone, coveredGoals, flowState, history, breakfast, coffee, previousVisit),
           audio: {
             output: {
               format: { type: 'pcm_s16le', sample_rate: 24000 },
@@ -529,7 +536,7 @@ async function serveStatic(request, response, url) {
   let pathname;
   try { pathname = decodeURIComponent(url.pathname); } catch { return sendJson(response, 400, { error: 'invalid_path' }); }
   if (pathname === '/') pathname = '/index.html';
-  const publicFiles = new Set(['/index.html', '/app.js', '/styles.css', '/dialogue-rules.js', '/voice-runtime.js', '/microphone-worklet.js', '/breakfast.js', '/breakfast-ui.js', '/coffee.js', '/scene-visuals.js', '/learning-evidence.js', '/world-learning-loop.js', '/learning-experience.js']);
+  const publicFiles = new Set(['/index.html', '/app.js', '/styles.css', '/dialogue-rules.js', '/voice-runtime.js', '/microphone-worklet.js', '/breakfast.js', '/breakfast-ui.js', '/coffee.js', '/scene-visuals.js', '/scene-memory.js', '/learning-evidence.js', '/world-learning-loop.js', '/learning-experience.js']);
   if (!publicFiles.has(pathname) && !pathname.startsWith('/assets/') && !pathname.startsWith('/node_modules/@phosphor-icons/web/src/')) return sendJson(response, 404, { error: 'not_found' });
   if (pathname.split('/').some((part) => part.startsWith('.'))) return sendJson(response, 404, { error: 'not_found' });
   const target = path.resolve(ROOT, `.${pathname}`);

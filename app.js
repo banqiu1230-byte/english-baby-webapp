@@ -271,6 +271,8 @@ const state = {
   hintLevel: 0,
   currentSpeech: 'Can you give me the apple?',
   activeQuestion: 'Can you give me the apple?',
+  lastHeardQuestion: '',
+  previousVisit: null,
   dragging: false,
   handsFreeListening: false,
   micMuted: false,
@@ -700,6 +702,8 @@ function captureUserTurnContext() {
     taskIndex: state.taskIndex,
     characterTurnId: state.characterTurnId,
     question: state.activeQuestion || state.currentSpeech || currentTask().prompt,
+    heardQuestion: state.lastHeardQuestion && state.lastHeardQuestion === state.activeQuestion
+      ? state.lastHeardQuestion : null,
   };
 }
 
@@ -1079,6 +1083,7 @@ function finalizeLearnerTranscript(transcript, { turn = state.activeVoiceTurn } 
 function acknowledgeCompletedTurn(text, message) {
   if (state.selectedScene !== 'coffee' || state.stage !== 'task-complete') return false;
   if (state.conversationFocus === 'chat') return false;
+  if (Coffee.orderReminderReply?.(text, state.coffee)) return false;
   const clean = String(text).toLowerCase().replace(/[.,!，。！]/g, '').trim();
   const courtesy = /^(yes|yeah|yep|yup|ok|okay|right|sure|correct|that's right|thank you|thanks|对|对的|是的|好|好的|嗯|嗯嗯|没错|谢谢)(\s+(please|thanks|thank you|yes|yeah))?$/.test(clean);
   const repeat = Coffee.advanceMission(state.coffee, text);
@@ -1286,7 +1291,33 @@ function saveLearningSession() {
   if (state.sessionSaved || state.stage !== 'complete') return;
   state.sessionSaved = true;
   globalThis.LumaExperience?.complete();
+  rememberCompletedVisit();
   syncLearningUi();
+}
+
+function previousCoffeeVisit() {
+  const memory = globalThis.LumaSceneMemory;
+  if (!memory || state.selectedScene !== 'coffee') return null;
+  try {
+    return memory.lastVisit(localStorage.getItem(memory.STORAGE_KEY), {
+      sceneId: 'coffee', excludeSessionId: globalThis.LumaExperience?.currentSession?.(), before: Date.now(),
+    });
+  } catch { return null; }
+}
+
+function rememberCompletedVisit() {
+  const memory = globalThis.LumaSceneMemory, experience = globalThis.LumaExperience;
+  if (!memory || state.selectedScene !== 'coffee' || !Coffee.missionComplete(state.coffee)) return;
+  const sessionId = experience?.currentSession?.(), profile = experience?.store?.getProfile?.();
+  const session = profile?.sessions?.find(item => item.id === sessionId && item.completedAt);
+  if (!session) return;
+  try {
+    const visits = memory.record(localStorage.getItem(memory.STORAGE_KEY), {
+      sessionId, sceneId: 'coffee', endedAt: session.completedAt, order: state.coffee,
+      evidence: { completed: true, attempts: profile.attempts },
+    });
+    localStorage.setItem(memory.STORAGE_KEY, JSON.stringify(visits));
+  } catch { /* An unavailable local store must never stop a conversation. */ }
 }
 
 function escapeHtml(value) {
@@ -1364,6 +1395,10 @@ function clearCharacterCaptionReveal({ complete = false } = {}) {
   clearTimeout(state.captionRevealTimer); state.captionRevealTimer = null;
   const message = state.dialogueHistory[state.streamingLumaIndex];
   if (complete && message?.speaker === 'luma' && state.captionCharacters.length) {
+    if (state.captionAudioStart > 0 && DialogueRules.isQuestion(state.captionCharacters.join(''))
+      && (state.expectedResponse?.kind !== 'say' || state.expectedResponse.updatesQuestion)) {
+      state.lastHeardQuestion = state.captionCharacters.join('');
+    }
     message.text = state.captionCharacters.join(''); renderDialogue();
   }
   state.captionCharacters = []; state.captionVisibleCount = 0;
@@ -1455,11 +1490,19 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
   if (!message || message.speaker !== 'user' || !message.final
     || message.revision !== context.revision || message.text !== context.answer
     || context.practiceSession !== state.practiceSession) return;
+  const reminder = state.selectedScene === 'coffee' && Coffee.orderReminderReply?.(message.text, state.coffee);
   const sameTask = state.selectedScene === context.sceneId && currentTask().id === context.taskId
-    && state.taskIndex === context.taskIndex && state.stage === 'active';
+    && state.taskIndex === context.taskIndex && (state.stage === 'active' || reminder);
   if (!sameTask) return;
   const inputSource = context.source || 'voice';
   if (!['voice', 'speech'].includes(inputSource)) return;
+  if (reminder) {
+    message.status = '已听到';
+    state.conversationFocus = 'chat';
+    clearTaskAdvance(); clearIdleNudge(); stopSpeechPlayback(); renderDialogue();
+    speak(reminder, { prompt: false });
+    return;
+  }
   if (feedback.technical_error) {
     message.inputSource = inputSource;
     message.status = '暂未确认 · 回答已保留，可继续说或点提示';
@@ -2387,7 +2430,10 @@ function discardReasoningLeak(fallbackReply = '', { retrySafe = true } = {}) {
   clearReplyTimeout();
   state.awaitingModelReply = false;
   state.awaitingPrompt = false;
-  const reply = fallbackReply || (!state.characterPromptDelivered ? currentTask().prompt : safeCharacterReply());
+  const pendingOpening = state.dialogueHistory.findLast(item => item.speaker === 'luma'
+    && item.pendingPlayback && item.taskId === currentTask().id)?.text;
+  const reply = fallbackReply || (!state.characterPromptDelivered
+    ? pendingOpening || state.activeQuestion || currentTask().prompt : safeCharacterReply());
   if (!retrySafe) {
     state.suppressDuplexResponse = false;
     after?.();
@@ -2447,7 +2493,7 @@ function connectDuplexSession() {
     if (!current()) return;
     sendDuplex({ type: 'start', taskId: currentTask().id, actionDone: state.actionDone,
       speechDone: state.speechDone, coveredGoals: [...state.coveredGoals], flowState: state.stage,
-      breakfast: state.breakfast, coffee: state.coffee, speechRate: preferences.speechRate, history: state.dialogueHistory.filter(m => m.final || m.speaker === 'luma').slice(-12).map(m => ({ role: m.speaker === 'user' ? 'user' : 'assistant', text: m.text })) });
+      breakfast: state.breakfast, coffee: state.coffee, previousVisit: state.previousVisit || null, speechRate: preferences.speechRate, history: state.dialogueHistory.filter(m => m.final || m.speaker === 'luma').slice(-12).map(m => ({ role: m.speaker === 'user' ? 'user' : 'assistant', text: m.text })) });
   };
   socket.onmessage = async (message) => {
     if (!current()) return;
@@ -2621,7 +2667,7 @@ function updateDuplexTask({ force = false } = {}) {
     coveredGoals: [...state.coveredGoals],
     flowState: state.stage,
     speechRate: preferences.speechRate,
-    breakfast: state.breakfast, coffee: state.coffee,
+    breakfast: state.breakfast, coffee: state.coffee, previousVisit: state.previousVisit || null,
   });
 }
 
@@ -2636,7 +2682,7 @@ function flushDuplexTaskUpdate() {
     coveredGoals: [...state.coveredGoals],
     flowState: state.stage,
     speechRate: preferences.speechRate,
-    breakfast: state.breakfast, coffee: state.coffee,
+    breakfast: state.breakfast, coffee: state.coffee, previousVisit: state.previousVisit || null,
   });
 }
 
@@ -3039,6 +3085,7 @@ function startTask(index, { speakAgain = true } = {}) {
   setApplePosition(state.initialApple, true);
   state.currentSpeech = '';
   state.activeQuestion = '';
+  state.lastHeardQuestion = '';
   state.nudgeInFlight = false;
   scene.classList.toggle('show-translation', preferences.rescue === '始终显示');
   if (!state.dialogueHistory.length) languagePanel.hidden = true;
@@ -3048,8 +3095,10 @@ function startTask(index, { speakAgain = true } = {}) {
   else connectDuplexSession().catch(() => {});
   state.awaitingPrompt = Boolean(speakAgain && !hasTransitionUtterance);
   if (speakAgain) {
+    const returnGreeting = task.id === 'coffee-order' && state.coffeeMissionId === 'C01'
+      ? globalThis.LumaSceneMemory?.returnGreeting(state.previousVisit) : '';
     const opening = state.dialogueHistory.length === 0
-      ? DialogueRules.openingLine(task.id, task.prompt) : task.prompt;
+      ? returnGreeting || DialogueRules.openingLine(task.id, task.prompt) : task.prompt;
     showPendingTaskPrompt(opening);
     if (hasTransitionUtterance) {
       const promptMessage = state.dialogueHistory.findLast(item => item.pendingPlayback && item.taskId === task.id);
@@ -3140,6 +3189,7 @@ function resetScene({ speakAgain = true, resumeCheckpoint = null, startTaskIndex
   state.taskIndex = Math.min(currentSceneConfig().tasks.length - 1, Math.max(0, requestedTaskIndex || 0));
   if (restartCoffeeMission) globalThis.LumaExperience?.store?.discardCheckpoint?.({ sessionId: resumeCheckpoint.sessionId });
   globalThis.LumaExperience?.begin(restartCoffeeMission ? null : resumeCheckpoint);
+  state.previousVisit = previousCoffeeVisit();
   closeDialogueHistoryPanel();
   renderDialogue();
   startTask(state.taskIndex, { speakAgain });

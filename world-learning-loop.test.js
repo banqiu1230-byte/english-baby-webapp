@@ -46,6 +46,33 @@ test('fresh learner starts a guided C01 coffee mission, without locks or invente
   assert.doesNotMatch(JSON.stringify(result), /掌握|\d+%/);
 });
 
+test('resuming a wrong-cup encounter explains the actual original order and allows keeping the cup', () => {
+  const f = fixture();
+  const id = f.session('coffee', { missionId: 'C03', variantId: 'C03-wrong-large' });
+  f.store.saveCheckpoint({ sessionId: id, sceneId: 'coffee', missionId: 'C03', variantId: 'C03-wrong-large', taskIndex: 0 });
+  const result = f.plan();
+  assert.equal(result.kind, 'resume');
+  assert.equal(result.missionId, 'C03');
+  assert.equal(result.title, '拿到的咖啡，好像不太对');
+  assert.match(result.reason, /原本点了小杯拿铁，带走/);
+  assert.match(result.reason, /也可以留下这杯/);
+  assert.equal(result.actionLabel, '继续这件事');
+  assert.doesNotMatch(`${result.title}${result.reason}${result.actionLabel}`, /C03|任务|考核|必须/);
+});
+
+test('resumed non-cafe scenes describe the authored life situation while retaining saved identity', () => {
+  const f = fixture();
+  for (const sceneId of ['kitchen', 'airport', 'office']) {
+    const id = f.session(sceneId);
+    const result = f.plan({ checkpoint: { sceneId, sessionId: id, taskIndex: 2 } });
+    assert.equal(result.sceneId, sceneId);
+    assert.equal(result.sessionId, id);
+    assert.equal(result.taskIndex, 0);
+    assert.equal(result.actionLabel, '继续这件事');
+    assert.doesNotMatch(`${result.title}${result.reason}`, /任务|第.*关|独立表达|能力/);
+  }
+});
+
 test('completed assisted coffee offers optional same-mission listening and a real breakfast alternative', () => {
   const f = fixture();
   const id = f.session('coffee', { missionId: 'C02', variantId: 'C02-small-latte-to-go' });
