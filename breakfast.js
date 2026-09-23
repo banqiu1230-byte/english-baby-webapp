@@ -25,16 +25,21 @@ const Breakfast = (() => {
     if (/[?？]|什么意思|怎么说|不懂|不明白|解释|what.*mean|how.*say/i.test(raw)
       || /\b(?:dont know|do not know|not sure|dont understand|do not understand|help me|repeat|say (?:it |that )?again)\b/.test(clean)) return null;
     if (taskId === 'breakfast-drink') {
+      const requestsDrink = /^(?:i want|i would like|id like|ill have|i choose|can i have)\b|^(?:我要|我想喝|想喝)/.test(clean);
+      const drinkQuestion = /(?:do you want|would you (?:like|prefer)|what would you like|what (?:do you want|can i get))/.test(asked);
+      if (asked && !requestsDrink && !drinkQuestion) return null;
       const match = clean.match(/^(?:(?:i want|i would like|id like|ill have|i choose|can i have) )?(milk|water)(?: please)?$/);
       if (match) return match[1];
       if (/^(?:我要|我想喝|想喝|喝)?牛奶$/.test(clean)) return 'milk';
       if (/^(?:我要|我想喝|想喝|喝)?水$/.test(clean)) return 'water';
+      const offered = asked.match(/^(?:(?:okay|sure|so|and) )?(?:do you want|would you like|would you prefer) (milk|water)(?: (?:today|please))?$/);
+      if (offered && /^(?:yes|yes please|yeah|yep|sure|okay|ok|好|好的|要)$/.test(clean)) return offered[1];
     }
     if (taskId === 'breakfast-more') {
       if (/^(?:more|more please|a little more(?: please)?|再来一点|再来点|还要)$/.test(clean)) return 'more';
       if (/^(?:enough|thats enough|no more|够了|不要了|不用了)$/.test(clean)) return 'enough';
       // Yes/no belongs to the question actually asked, never just the task ID.
-      if (/\bmore\b|再来|还要/.test(asked)) {
+      if (/^(?:(?:(?:okay|sure|so|and) )?(?:do you want|would you like|would you like to have|want|how about) )?(?:a little )?more(?: (?:milk|water|to drink))?$|^(?:还要|要不要|想不想)(?:再来)?(?:一点|点|一些)?(?:牛奶|水)?$/.test(asked)) {
         if (/^(?:yes|yes please|yeah|yep|好|好的|要)$/.test(clean)) return 'more';
         if (/^(?:no|no thanks|no thank you|不了|不要|不用)$/.test(clean)) return 'enough';
       }

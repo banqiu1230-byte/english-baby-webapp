@@ -396,7 +396,7 @@ test('mission turns are immutable, revision checked and replay safe', () => {
 function feedbackHarness(body, parsed = {}, configured = false) {
   const source = fs.readFileSync(require.resolve('./server.js'), 'utf8');
   const responses = [], requests = [];
-  const context = vm.createContext({ Coffee, Breakfast: require('./breakfast'), AbortController, setTimeout, clearTimeout,
+  const context = vm.createContext({ Coffee, Breakfast: require('./breakfast'), DialogueRules: require('./dialogue-rules'), AbortController, setTimeout, clearTimeout,
     process: { env: configured ? { DEEPSEEK_API_KEY: 'test-only' } : {} }, console: { error() {} },
     readJson: async () => body,
     sendJson: (_response, status, payload) => { responses.push({ status, payload }); },

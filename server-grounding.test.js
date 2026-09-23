@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const Coffee = require('./coffee');
 const Breakfast = require('./breakfast');
+const DialogueRules = require('./dialogue-rules');
 const source = fs.readFileSync(require.resolve('./server'), 'utf8');
 
 function instructions(taskId, world = Coffee.initial(), flowState = 'active') {
@@ -17,7 +18,7 @@ function instructions(taskId, world = Coffee.initial(), flowState = 'active') {
 
 function feedback(body, parsed = {}) {
   const responses = [], requests = [];
-  const context = vm.createContext({ Coffee, Breakfast, AbortController, setTimeout, clearTimeout,
+  const context = vm.createContext({ Coffee, Breakfast, DialogueRules, AbortController, setTimeout, clearTimeout,
     process: { env: { DEEPSEEK_API_KEY: 'test-only' } }, console: { error() {} },
     readJson: async () => body,
     sendJson: (_response, status, payload) => responses.push({ status, payload }),
@@ -153,5 +154,73 @@ test('task transition and completion instructions preserve the open conversation
     assert.doesNotMatch(text, /Do not ask any question/);
     if (state === 'complete') assert.match(text, /Completion is not a command to end the conversation/);
     if (state === 'task-complete') assert.match(text, /conversation remains open/);
+  }
+});
+
+test('non-coffee voice context distinguishes static artwork from spoken scenario facts', () => {
+  for (const id of ['ticket', 'bag', 'gate-a12']) {
+    const text = instructions(id);
+    assert.match(groundTruth(text), /ticket.*suitcase.*airport worker/);
+    assert.match(groundTruth(text), /no readable gate sign is shown/);
+    assert.doesNotMatch(groundTruth(text), /gate A12 sign/);
+  }
+  const gate = instructions('gate-a12');
+  assert.match(gate, /tell them A12 plainly rather than making them guess an invisible sign/);
+  assert.match(gate, /acknowledge their stated itinerary/);
+  assert.doesNotMatch(gate, /complete the goal by saying A12|Ask which gate they are going to and accept A12/);
+  for (const id of ['office-purpose', 'office-signin', 'office-wait', 'office-greeting']) {
+    const text = instructions(id);
+    assert.match(groundTruth(text), /receptionist.*visitor holding a folder/);
+    assert.match(groundTruth(text), /Maya is not depicted/);
+  }
+  assert.match(instructions('office-wait'), /do not claim Maya has arrived/);
+  assert.match(instructions('office-greeting'), /does not depict Maya arriving/);
+  assert.match(instructions('office-greeting'), /Do not narrate an entrance/);
+});
+
+test('all authored scenes keep the conversation open during and after completion', () => {
+  for (const id of ['breakfast-cup', 'bag', 'office-signin', 'office-greeting']) {
+    for (const state of ['task-complete', 'complete']) {
+      const text = instructions(id, Coffee.initial(), state);
+      assert.match(text, /latest conversational meaning takes priority/);
+      assert.match(text, /Keep talking naturally even when the latest words do not complete/);
+      if (state === 'complete') assert.match(text, /Completion is not a command to end the conversation/);
+      else assert.match(text, /conversation remains open/);
+    }
+  }
+  assert.match(instructions('breakfast-cup'), /If the learner declines, asks a question, or chats instead/);
+  assert.match(instructions('office-signin'), /interpret unrelated conversation as a name/);
+});
+
+test('non-coffee preferences and side conversations bypass task scoring', async () => {
+  const cases = [
+    ['kitchen', 'breakfast-drink', 'What do you usually drink?', 'Milk.'],
+    ['kitchen', 'breakfast-drink', 'What is your favorite drink?', 'Water.'],
+    ['kitchen', 'breakfast-cup', 'Can I have the cup, please?', "Let's just talk."],
+    ['airport', 'bag', 'Is this your bag?', 'I had a small bag yesterday.'],
+    ['office', 'office-signin', 'What do you like?', 'Coffee.'],
+  ];
+  for (const [sceneId, taskId, question, answer] of cases) {
+    const h = feedback({ sceneId, taskId, question, answer }, { meaning_valid: true, choice: 'milk' });
+    await h.run();
+    assert.equal(h.responses[0].status, 200, answer);
+    assert.equal(h.responses[0].payload.meaning_valid, false, answer);
+    assert.equal(h.responses[0].payload.choice, null, answer);
+    assert.equal(h.responses[0].payload.conversational, true, answer);
+    assert.equal(h.requests.length, 0, answer);
+  }
+});
+
+test('breakfast accepts real short responses without an additional model request', async () => {
+  for (const [taskId, question, answer, choice] of [
+    ['breakfast-drink', 'Do you want milk or water?', 'Milk.', 'milk'],
+    ['breakfast-cup', 'Can I have the cup, please?', 'Here you are.', 'place'],
+    ['breakfast-more', 'Do you want more milk?', 'No, thanks.', 'enough'],
+  ]) {
+    const h = feedback({ sceneId: 'kitchen', taskId, question, answer });
+    await h.run();
+    assert.equal(h.responses[0].payload.meaning_valid, true, answer);
+    assert.equal(h.responses[0].payload.choice, choice, answer);
+    assert.equal(h.requests.length, 0, answer);
   }
 });

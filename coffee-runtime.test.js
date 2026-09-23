@@ -125,6 +125,7 @@ test('a clear next-step answer spoken during the previous acknowledgment is rebo
   h.s.coveredGoals = new Set(['coffee-order']);
   h.task.id = 'coffee-order';
   h.task.requiresAction = false;
+  h.s.activeQuestion = 'What can I get for you?';
 
   const turn = h.c.acceptTranscriptEvent({ item_id: 'early-size' }, { allowStart: true });
   h.c.finalizeLearnerTranscript('Large.', { turn });
@@ -145,7 +146,7 @@ test('a clear next-step answer spoken during the previous acknowledgment is rebo
   assert.equal(message.status, '已接到下一步 · 正在确认');
   assert.equal(h.effects.filter(effect => effect.type === 'rebound').length, 1);
   const rebound = h.effects.find(effect => effect.type === 'rebound');
-  assert.equal(rebound.question, 'Would you like a small or a large americano?');
+  assert.equal(rebound.question, 'What can I get for you?', 'preserve the question actually heard when the early size was spoken');
   assert.equal(rebound.answer, 'Large.');
   assert.equal(rebound.context.taskId, 'coffee-size');
   assert.equal(rebound.context.messageId, message.id);

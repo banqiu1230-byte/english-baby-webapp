@@ -7,6 +7,19 @@ const {
   transitionDwell,
   transitionReplyReplacement,
 } = require('./dialogue-rules');
+const { isConversationOnly } = require('./dialogue-rules');
+
+test('social context never turns a mentioned object or short answer into a service decision', () => {
+  for (const [answer, question] of [
+    ['Milk.', 'What do you usually drink?'], ['Coffee.', 'What is your favorite drink?'],
+    ['Yes.', 'Do you like your work?'], ["Let's just chat.", 'May I see your ticket?'],
+    ['I had water yesterday.', 'Do you want milk or water?'],
+  ]) assert.equal(isConversationOnly(answer, question), true, answer);
+  for (const [answer, question] of [
+    ['Milk.', 'Do you want milk or water?'], ['Yes.', 'Is this your bag?'],
+    ['Can I have milk?', 'What do you usually drink?'], ['My name is Li.', 'How are you?'],
+  ]) assert.equal(isConversationOnly(answer, question), false, answer);
+});
 
 test('an utterance only advances the task it actually satisfies', () => {
   assert.equal(matchesTask('apple', 'It is an apple.'), true);

@@ -261,7 +261,7 @@ test('failed character recovery drains deferred events and releases a completed 
   assert.equal(learner, 0);
 });
 
-test('successful task cancellation drains queued speech and advances even without a provider reply', async () => {
+test('successful task cancellation drains queued speech and respects a queued request to wait', async () => {
   for (const connected of [true, false]) {
     const nextTasks = [];
     const h = harness({
@@ -293,7 +293,7 @@ test('successful task cancellation drains queued speech and advances even withou
     assert.equal(h.s.stage, 'task-complete');
     assert.equal(h.s.deferredVoiceEvents.length, 0);
     await h.advance(15000);
-    assert.deepEqual(nextTasks, [1], connected ? 'connected queue' : 'disconnected queue');
+    assert.deepEqual(nextTasks, connected ? [] : [1], connected ? 'the audible wait request pauses advancement' : 'no new learner turn blocks ordinary advancement');
     assert.equal(h.c.isConversationTurnPending(), false);
     if (connected) assert.ok(h.s.dialogueHistory.some(message => message.text === 'Actually, wait.' && message.final));
   }

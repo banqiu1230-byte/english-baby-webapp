@@ -87,6 +87,18 @@ const DialogueRules = (() => {
     }[taskId];
     return greeting ? `${greeting} ${prompt}` : prompt;
   };
+  // Conversation context matters even when the reply contains a task word.
+  // A fresh, explicit request can still bring the interaction back to service.
+  const isConversationOnly = (value, question = '') => {
+    const clean = normalize(value), asked = normalize(question), raw = String(value || '');
+    if (/\b(?:let s (?:just )?(?:talk|chat)|i (?:just )?want to (?:talk|chat)|not ready|don t want to (?:order|continue))\b/.test(clean)
+      || /聊聊天|聊点别的|先不点|不想点单|自由聊|先不继续/.test(raw)) return true;
+    if (/\b(?:i (?:would like|want)|i d like|i ll have|(?:can|could|may) i (?:have|get|order)|my name is|i m here to (?:see|meet)|i am here to (?:see|meet))\b/.test(clean)
+      || /我要|我想要|我想喝|我想点|我的名字|我叫|我要找/.test(raw)) return false;
+    if (/\b(?:yesterday|last (?:week|night|time)|used to|i (?:usually|often|always)|i (?:drank|had)|my (?:mother|father|friend|sister|brother) (?:likes|drinks|wants))\b/.test(clean)
+      || /昨天|上周|以前|我经常|我平时/.test(raw)) return true;
+    return /\b(?:favou?rite|usually|often|do you like|what do you (?:like|prefer)|tell me about|where are you from|how are you|how was your|how s your)\b/.test(asked);
+  };
   const requirementsMet = ({ needsAction, actionDone, needsSpeech, speechDone }) => (
     (!needsAction || actionDone) && (!needsSpeech || speechDone) && (actionDone || speechDone)
   );
@@ -127,6 +139,7 @@ const DialogueRules = (() => {
     matchesTask,
     supportIntent,
     isSmallTalk,
+    isConversationOnly,
     openingLine,
     requirementsMet,
     isQuestion,

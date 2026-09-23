@@ -55,7 +55,10 @@ function syncBreakfastGeometry() {
 
 function renderBreakfast() {
   const active = isBreakfastScene() && state.sceneStarted;
-  breakfastWorld.hidden = !active; breakfastPanel.hidden = !active;
+  breakfastWorld.hidden = !active;
+  // Keep the scene unobstructed. The shared bottom help control is always
+  // available; this legacy scaffold appears only after an explicit help request.
+  breakfastPanel.hidden = !active || !state.breakfastHelp || state.stage !== 'active';
   if (!active) { delete scene.dataset.breakfast; return; }
   const task = currentTask(), world = state.breakfast;
   scene.dataset.breakfast = task.id;
@@ -101,6 +104,7 @@ function commitBreakfastChoice(choice, { source = 'speech', utterance = '' } = {
   const taskId = currentTask().id, next = Breakfast.apply(state.breakfast, taskId, choice);
   if (next === state.breakfast) return false;
   state.breakfast = next;
+  state.conversationFocus = 'task';
   state.actionDone = true;
   // A language response changes the scene. It is never reclassified as a physical action.
   if (utterance) {

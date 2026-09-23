@@ -187,7 +187,7 @@ const AIRPORT_TASKS = [
 const OFFICE_TASKS = [
   { id: 'office-purpose', interaction: 'speech', requiresAction: false, speaker: '前台', prompt: 'Who are you here to see?', hint: '告诉前台你来见谁；不需要照着固定句子说。' },
   { id: 'office-signin', interaction: 'speech', requiresAction: false, speaker: '前台', prompt: 'What is your name, please?', hint: '告诉前台你的名字，例如 My name is Li。' },
-  { id: 'office-wait', interaction: 'none', requiresAction: false, requiresSpeech: false, autoAdvance: true, speaker: '前台', prompt: 'Please wait here. Maya is coming.', hint: '这一句只需要听懂，情境会自己继续。' },
+  { id: 'office-wait', interaction: 'none', requiresAction: false, requiresSpeech: false, autoAdvance: true, speaker: '前台', prompt: 'You can wait here for Maya.', hint: '这一句只需要听懂，情境会自己继续。' },
   { id: 'office-greeting', interaction: 'speech', requiresAction: false, speaker: 'Maya', prompt: "Hi, I'm Maya. Nice to meet you.", hint: '自然回应 Maya 的问候即可，不设唯一答案。' },
 ];
 
@@ -225,7 +225,6 @@ const SCENE_CONFIGS = {
   },
 };
 
-const FINAL_REVIEW_DWELL_MS = 4200;
 // Let the learner absorb a complete acknowledgment before the next prompt.
 // This quiet period starts only after the current voice turn has settled.
 const TASK_ADVANCE_DWELL_MS = 1600;
@@ -1049,7 +1048,7 @@ function finalizeLearnerTranscript(transcript, { turn = state.activeVoiceTurn } 
   if (turn.superseded && DialogueRules.supportIntent(clean)) return;
   if (!turn.superseded && message && stageTransitionUtterance(clean, turn, message)) return;
   if (!turn.superseded && message && acknowledgeCompletedTurn(clean, message)) return;
-  if (!turn.superseded && state.selectedScene === 'coffee' && ['task-complete', 'complete'].includes(state.stage)) {
+  if (!turn.superseded && ['task-complete', 'complete'].includes(state.stage)) {
     if (state.stage === 'task-complete' && DialogueRules.supportIntent(clean) === 'continue') {
       const next = currentSceneConfig().tasks.findIndex((candidate, index) => index > state.taskIndex && !state.coveredGoals.has(candidate.id));
       if (next >= 0) { state.conversationFocus = 'task'; startTask(next); return; }
@@ -1078,7 +1077,7 @@ function finalizeLearnerTranscript(transcript, { turn = state.activeVoiceTurn } 
 }
 
 function acknowledgeCompletedTurn(text, message) {
-  if (state.selectedScene !== 'coffee' || !['task-complete', 'complete'].includes(state.stage)) return false;
+  if (state.selectedScene !== 'coffee' || state.stage !== 'task-complete') return false;
   if (state.conversationFocus === 'chat') return false;
   const clean = String(text).toLowerCase().replace(/[.,!，。！]/g, '').trim();
   const courtesy = /^(yes|yeah|yep|yup|ok|okay|right|sure|correct|that's right|thank you|thanks|对|对的|是的|好|好的|嗯|嗯嗯|没错|谢谢)(\s+(please|thanks|thank you|yes|yeah))?$/.test(clean);
@@ -1100,15 +1099,26 @@ function acknowledgeCompletedTurn(text, message) {
 }
 
 function stageTransitionUtterance(text, turn, message) {
-  if (state.stage !== 'task-complete' || state.selectedScene !== 'coffee' || !message || !turn) return false;
+  if (state.stage !== 'task-complete' || !message || !turn) return false;
   const tasks = currentSceneConfig().tasks;
   const nextTaskIndex = tasks.findIndex((candidate, index) => index > state.taskIndex && !state.coveredGoals.has(candidate.id));
   const nextTask = tasks[nextTaskIndex];
-  const engineStep = Coffee.nextMissionStep?.(state.coffee);
-  if (!nextTask || engineStep?.taskId !== nextTask.id) return false;
-  const preview = Coffee.advanceMission(state.coffee, text, { expectedRevision: state.coffee?.revision, question: turn.context?.question });
-  const advancesNextTask = preview.accepted
-    && (preview.changedFields || []).map(coffeeTaskForChangedField).includes(nextTask.id);
+  if (!nextTask || DialogueRules.isConversationOnly(text, turn.context?.question)) return false;
+  let advancesNextTask = false;
+  if (state.selectedScene === 'coffee') {
+    const engineStep = Coffee.nextMissionStep?.(state.coffee);
+    if (engineStep?.taskId !== nextTask.id) return false;
+    const preview = Coffee.advanceMission(state.coffee, text, { expectedRevision: state.coffee?.revision, question: turn.context?.question });
+    advancesNextTask = preview.accepted
+      && (preview.changedFields || []).map(coffeeTaskForChangedField).includes(nextTask.id);
+  } else if (Breakfast.isTask(nextTask.id)) {
+    advancesNextTask = Boolean(Breakfast.choiceFromText(nextTask.id, text, turn.context?.question));
+  } else {
+    // A short yes or a bare name belongs to the actual question. Don't
+    // reinterpret social agreement as a bag answer or sign-in for the next step.
+    advancesNextTask = DialogueRules.matchesTask(nextTask.id, text)
+      && normalizedSpeech(turn.context?.question) === normalizedSpeech(nextTask.prompt);
+  }
   if (!advancesNextTask) return false;
   stopSpeechPlayback();
   state.pendingTransitionUtterance = {
@@ -1116,6 +1126,7 @@ function stageTransitionUtterance(text, turn, message) {
     taskId: nextTask.id,
     taskIndex: nextTaskIndex,
     messageId: message.id,
+    question: turn.context?.question,
     text: String(text || '').trim(),
   };
   message.status = '已听到 · 下一步出现后确认';
@@ -1140,6 +1151,7 @@ function consumeTransitionUtterance() {
   renderDialogue();
   const context = {
     ...captureUserTurnContext(),
+    question: pending.question || state.activeQuestion,
     messageId: message.id,
     revision: message.revision,
     answer: message.text,
@@ -1217,7 +1229,7 @@ function syncSceneProgress() {
   sceneProgress.setAttribute('aria-valuenow', String(completed));
   sceneProgress.setAttribute('aria-valuetext', missing.length ? `已完成 ${completed}/${tasks.length}，当前还需${missing.join('和')}` : `已完成 ${completed}/${tasks.length}`);
   syncCoffeeMissionHud();
-  const canFinish = state.selectedScene === 'coffee' && state.stage === 'complete';
+  const canFinish = state.stage === 'complete';
   const finish = document.querySelector('#finishConversation');
   if (finish) finish.hidden = !canFinish;
   resetButton.hidden = canFinish;
@@ -1528,20 +1540,26 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
   const acknowledgement = isActionAcknowledgement(currentTask(), message.text, context.question);
   const offered = /^(?:here|here you (?:are|go))[.!]?$/i.test(message.text.trim());
   const accepted = feedback.meaning_valid === true && (!acknowledgement || offered);
-  globalThis.LumaExperience?.noteAnswer(context, accepted ? 'success' : 'unconfirmed');
   if (Breakfast.isTask(context.taskId)) {
     const committed = feedback.meaning_valid === true && feedback.choice
       && commitBreakfastChoice(feedback.choice, { utterance: message.text, source: inputSource });
     message.taskAccepted = Boolean(committed);
-    message.status = committed ? '已确认' : '还没确认这一项 · 可继续说或点提示';
+    if (committed) {
+      state.conversationFocus = 'task';
+      globalThis.LumaExperience?.noteAnswer(context, 'success');
+    }
+    else { state.conversationFocus = 'chat'; clearIdleNudge(); }
+    message.status = committed ? '已确认' : '继续当前对话';
     renderDialogue();
-    if (!committed) scheduleIdleNudge();
     return;
   }
   if (!accepted) {
-    message.status = '还没确认这一项 · 可继续说或点提示';
-    renderDialogue(); scheduleIdleNudge(); return;
+    state.conversationFocus = 'chat'; clearIdleNudge();
+    message.status = '继续当前对话';
+    renderDialogue(); return;
   }
+  state.conversationFocus = 'task';
+  globalThis.LumaExperience?.noteAnswer(context, 'success');
   message.taskAccepted = true; message.status = '已确认'; renderDialogue();
   state.lastTranscript = message.text;
   state.speechDone = true;
@@ -1560,6 +1578,9 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
 async function requestLanguageFeedback(question, answer, turnContext = {}) {
   const context = { ...captureUserTurnContext(), ...turnContext, question, answer };
   if (!context.final || context.practiceSession !== state.practiceSession || DialogueRules.supportIntent(answer)) return;
+  if (state.selectedScene !== 'coffee' && DialogueRules.isConversationOnly(answer, question)) {
+    applyDynamicFeedback({ conversational: true }, context); return;
+  }
   if (Breakfast.isTask(context.taskId)) {
     const choice = Breakfast.choiceFromText(context.taskId, answer, question);
     if (choice) { applyDynamicFeedback({ meaning_valid: true, choice }, context); return; }
@@ -2090,7 +2111,9 @@ function settleFailedDuplexTurn() {
     // Keep a real route back into the task in the conversation, not only in
     // an expiring toast. Neither provider failure nor unrelated speech passes
     // the task or takes away the ability to answer / ask for help.
-    const prompt = state.activeQuestion || currentTask().question || currentTask().prompt;
+    const prompt = state.conversationFocus === 'chat'
+      ? "Sorry, I missed that. Could you say it again?"
+      : state.activeQuestion || currentTask().question || currentTask().prompt;
     if (prompt) {
       showUnplayedCharacterLine(prompt, true);
       const recovery = state.dialogueHistory.at(-1);
@@ -2333,7 +2356,7 @@ function safeCharacterReply() {
       cup: 'Yes. You touched the cup.',
       spoon: 'Yes. You found the spoon.',
       ticket: 'Thank you.',
-      'gate-a12': 'Great. You found A12.',
+      'gate-a12': 'Okay. Have a good flight.',
       'office-signin': 'Thank you.',
     };
     return completedReplies[currentTask().id] || 'Great.';
@@ -2710,8 +2733,12 @@ function handleConversationSupport(text, context, message, { responseStarted = f
   const question = context.question || currentTask().prompt;
   state.activeQuestion = question;
   if (intent === 'continue' || intent === 'replay') {
+    if (intent === 'continue') {
+      if (state.conversationFocus === 'chat' && !isCurrentTaskQuestion(question)) state.activeQuestion = currentTask().prompt;
+      state.conversationFocus = 'task';
+    }
     if (intent === 'replay') globalThis.LumaExperience?.noteHelp(1, 'replay');
-    speak(question); return true;
+    speak(state.activeQuestion); return true;
   }
   const support = speechSupportForTask();
   globalThis.LumaExperience?.noteHelp(intent === 'meaning' ? 1 : 3, intent);
@@ -3425,7 +3452,7 @@ function scheduleTaskAdvance(nextTaskIndex) {
   let quietSince = 0;
 
   const waitForStableQuiet = () => {
-    if (state.stage !== 'task-complete' || !experience.classList.contains('is-active')) {
+    if (state.stage !== 'task-complete' || state.conversationFocus === 'chat' || !experience.classList.contains('is-active')) {
       clearTaskAdvance();
       return;
     }
@@ -3456,39 +3483,8 @@ function scheduleTaskAdvance(nextTaskIndex) {
 
 function scheduleReview() {
   clearReviewTransition();
-  // The order is complete, but the conversation belongs to the guest.
-  // They can keep talking and open the reflection with End conversation.
-  if (state.selectedScene === 'coffee') return;
-  let quietSince = 0;
-
-  const waitForStableQuiet = () => {
-    if (state.stage !== 'complete' || !experience.classList.contains('is-active')) {
-      clearReviewTransition();
-      return;
-    }
-    if (isConversationTurnPending()) {
-      quietSince = 0;
-      state.reviewTimer = setTimeout(waitForStableQuiet, 220);
-      return;
-    }
-    if (!quietSince) {
-      quietSince = Date.now();
-      setMode(`${currentTask().speaker || 'Luma'} 听懂了 · 这一段完成了`, 'is-complete');
-    }
-    const dwell = DialogueRules.transitionDwell(latestFollowupText(), {
-      normal: FINAL_REVIEW_DWELL_MS,
-      afterQuestion: 12000,
-    });
-    const remaining = dwell - (Date.now() - quietSince);
-    if (remaining > 0) {
-      state.reviewTimer = setTimeout(waitForStableQuiet, Math.min(220, remaining));
-      return;
-    }
-    state.reviewTimer = null;
-    showReview();
-  };
-
-  waitForStableQuiet();
+  // Background goals may be complete while the learner still wants to talk.
+  // The visible End conversation button is the only forward exit in every scene.
 }
 
 function completeMultimodalTask({ waitForDuplexReply = false } = {}) {
@@ -3826,7 +3822,7 @@ sheetCta.addEventListener('click', () => {
   });
 });
 exitScene.addEventListener('click', () => {
-  if (state.selectedScene === 'coffee' && state.stage === 'complete') showReview();
+  if (state.stage === 'complete') showReview();
   else leaveScene();
 });
 document.querySelector('#finishConversation')?.addEventListener('click', showReview);
@@ -3839,12 +3835,8 @@ resetButton.addEventListener('click', () => {
 });
 subtitleToggle.addEventListener('click', () => { toggleSubtitles(); if (!state.subtitlesHidden) globalThis.LumaExperience?.noteHelp(1, 'subtitles'); });
 replayButton.addEventListener('click', () => {
-  if (['task-complete', 'complete'].includes(state.stage)) {
-    showToast('这一题已经确认，正在继续下一步。', 2600);
-    return;
-  }
   globalThis.LumaExperience?.noteHelp(1, 'replay');
-  speak(state.activeQuestion || currentTask().prompt, { rate: .84 });
+  speak(latestCharacterText() || state.activeQuestion || currentTask().prompt, { rate: .84, prompt: false });
 });
 helpButton.addEventListener('click', showHint);
 micButton.addEventListener('click', toggleHandsFreeListening);

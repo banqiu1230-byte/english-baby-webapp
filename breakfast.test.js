@@ -47,6 +47,16 @@ test('yes and no are tied to the actual more question', () => {
   assert.equal(B.choiceFromText('breakfast-more', 'Yes.', 'Do you have a cat?'), null);
   assert.equal(B.choiceFromText('breakfast-more', 'Enough.'), 'enough');
 });
+test('breakfast decisions use the actual service question instead of a shared keyword', () => {
+  assert.equal(B.choiceFromText('breakfast-drink', 'Milk.', 'What do you usually drink?'), null);
+  assert.equal(B.choiceFromText('breakfast-drink', 'Water.', 'What is your favorite drink?'), null);
+  assert.equal(B.choiceFromText('breakfast-drink', 'I want milk.', 'What is your favorite drink?'), 'milk');
+  assert.equal(B.choiceFromText('breakfast-drink', 'Yes.', 'Would you like milk?'), 'milk');
+  assert.equal(B.choiceFromText('breakfast-drink', 'Yes.', 'Do you want milk or water?'), null);
+  assert.equal(B.choiceFromText('breakfast-drink', 'No.', 'Would you like milk?'), null);
+  assert.equal(B.choiceFromText('breakfast-more', 'Yes.', 'Do you know how much more this costs?'), null);
+  assert.equal(B.choiceFromText('breakfast-more', 'Yes.', 'Do you want more water?'), 'more');
+});
 test('world state is sequential, immutable and idempotent', () => {
   const empty = B.initial();
   assert.equal(B.apply(empty, 'breakfast-more', 'more'), empty);
