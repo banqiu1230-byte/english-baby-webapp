@@ -552,6 +552,31 @@ const Coffee = (() => {
     return [...state.appliedEventIds, eventId.trim()];
   }
 
+  function acceptsDeliveredCup(state, text, interpretation, question = '') {
+    if (interpretation.kind === 'question' || interpretation.kind === 'negated'
+      || interpretation.help || interpretation.ambiguousFields.length) return false;
+    const clean = normalize(text), asked = normalize(question);
+    // Keep acceptance tied to the cup that is actually present. Naming a cup
+    // in a description, asking about it, or thanking Mia is not a decision.
+    if (Object.entries(interpretation.slots).some(([field, value]) => state.delivered?.[field] !== value)
+      || Object.keys(interpretation.observedSlots).length) return false;
+    if (/^(?:ill keep (?:it|this one)|i will keep (?:it|this one)|(?:this|that|it) is (?:fine|okay|ok)|thats (?:fine|okay|ok)|就这杯吧|这样也可以)$/.test(clean)) return true;
+    const size = state.delivered?.size === 'large' ? '(?:large|big)' : '(?:small|little)';
+    const chineseSize = state.delivered?.size === 'large' ? '大杯' : '小杯';
+    if (/^(?:yes|yes please|是的|可以)$/.test(clean)) return /is everything (?:okay|ok)$/.test(asked)
+      || new RegExp(`^would you like to keep (?:the |this |that )?${size}(?: cup| one)?$`).test(asked);
+    const namedCup = `(?:(?:a|the) )?${size}(?: (?:one|cup|coffee|${state.delivered.drink}))?`;
+    const explicitChoice = new RegExp(`^(?:(?:i (?:want|would like)|id like|ill (?:have|take|keep)|i will (?:have|take|keep)) |(?:can|could|may) i (?:have|get) )${namedCup}(?: please| thanks| thank you)?$`);
+    const explicitChinese = new RegExp(`^(?:(?:我)?(?:就要|要|想要)|我就选)${chineseSize}(?:吧|就行|就好|就可以)?$`);
+    const acceptedSize = new RegExp(`^(?:${size} is (?:fine|okay|ok)|${chineseSize}(?:也可以|就行|就好|就可以))$`);
+    if (explicitChoice.test(clean) || explicitChinese.test(clean) || acceptedSize.test(clean)) return true;
+    // A one-word reply to "What size is this?" describes the cup; the same
+    // reply to the service question chooses to keep it.
+    const asksForDescription = /\b(?:what|which) size (?:is|was)|\b(?:is|was) (?:this|that|it)(?: cup)? (?:small|large|big)|\bwhat (?:did i|have i) (?:give|bring)|这(?:个|一)?杯(?:是|有)多大|这(?:个|一)?杯是什么杯型|这(?:个|一)?杯是(?:大杯|小杯)/.test(asked);
+    return !asksForDescription && (new RegExp(`^${namedCup}(?: please| thanks| thank you)?$`).test(clean)
+      || new RegExp(`^${chineseSize}(?:吧|\\s*谢谢)?$`).test(clean));
+  }
+
   function advanceMission(world, text, options = {}) {
     const state = normalizeMissionWorld(world);
     if (!state) return missionResult(null, { reason: 'unknown-mission' });
@@ -573,14 +598,14 @@ const Coffee = (() => {
     if (conversationalReply) return missionResult(state, { handled: true, reason: 'conversation-repair', interpretation, prompt: conversationalReply });
 
     if (state.stage === 'repair') {
-      const acceptsVisibleCup = /^(?:ill keep (?:it|this one)|i will keep (?:it|this one)|(?:this|that|it|large) is (?:fine|okay|ok)|thats (?:fine|okay|ok)|就这杯吧|大杯也可以|这样也可以)$/.test(normalize(text))
-        || (/^(?:yes|yes please|是的|可以)$/.test(normalize(text)) && /is everything (?:okay|ok)$/.test(normalize(options.question)));
-      if (acceptsVisibleCup) {
-        const next = normalizeMissionWorld({ ...state, acceptedAsDelivered: true,
+      if (acceptsDeliveredCup(state, text, interpretation, options.question)) {
+        const thanked = interpretation.gratitude && /\b(?:thanks|thank you)\b|谢谢/.test(normalize(text));
+        const next = normalizeMissionWorld({ ...state, acceptedAsDelivered: true, received: Boolean(thanked),
           revision: state.revision + 1, appliedEventIds: eventIdsWith(state, eventId) });
         // Accepting the delivered cup is a valid service outcome, not evidence
         // that the learner practised correcting a wrong size.
-        return missionResult(next, { accepted: true, handled: true, reason: 'delivery-accepted', changedFields: [], interpretation });
+        return missionResult(next, { accepted: true, handled: true, reason: 'delivery-accepted',
+          changedFields: thanked ? ['received'] : [], interpretation });
       }
       const comparison = compareOrder(state);
       const needed = comparison.deliveryMismatches;

@@ -60,6 +60,7 @@ function harness(overrides = {}) {
     CHARACTER_AUDIO_QUIET_MS: sourceNumber('CHARACTER_AUDIO_QUIET_MS'),
     CHARACTER_CLOCK_STALL_MS: sourceNumber('CHARACTER_CLOCK_STALL_MS'),
     CHARACTER_TURN_MAX_MS: sourceNumber('CHARACTER_TURN_MAX_MS'),
+    FINAL_REVIEW_DWELL_MS: sourceNumber('FINAL_REVIEW_DWELL_MS'),
     currentTask: () => task, currentSceneConfig: () => ({ tasks: [task] }),
     scene: getNode('scene'), experience: getNode('experience'), micButton: getNode('micButton'), micLabel: getNode('micLabel'),
     renderDialogue() {}, setTurnPhase() {}, setMode() {}, ensureSceneVoiceIsOpen() {},

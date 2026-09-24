@@ -77,3 +77,11 @@ test('a line during an image change cannot read old prop cues or restore an obso
   api.clear(); requests.get('./assets/breakfast/table.webp').onload(); await Promise.resolve();
   assert.equal(image.src,'./assets/breakfast/fridge.webp'); assert.equal(layer.hidden,true);
 });
+
+test('keeping the delivered large cup is never described as a small-cup replacement', () => {
+  const kept = Coffee.advanceMission(Coffee.missionInitial('C03'), 'Large is fine.').world;
+  const frame = frameFor('coffee', 'coffee-size', kept);
+  assert.equal(frame.selected, 'large');
+  assert.match(frame.caption, /保留.*大杯/);
+  assert.doesNotMatch(frame.caption, /换好|小杯/);
+});

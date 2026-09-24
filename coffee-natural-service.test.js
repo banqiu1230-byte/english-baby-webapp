@@ -309,17 +309,17 @@ test('an explicit supported choice after rejecting cappuccino can place the actu
 });
 
 for (const sceneId of ['coffee', 'kitchen']) {
-  test(`${sceneId}: end-of-scene review leaves the conversation open`, async () => {
-    const h = harness({ FINAL_REVIEW_DWELL_MS: 4000,
+  test(`${sceneId}: end-of-scene review waits while the guest is still speaking`, async () => {
+    const h = harness({
       showReview: () => h.effects.push({ type: 'review' }),
     });
-    Object.assign(h.s, { selectedScene: sceneId, stage: 'complete' });
+    Object.assign(h.s, { selectedScene: sceneId, stage: 'complete', localSpeechActive: true });
     h.load('clearReviewTransition', 'latestFollowupText', 'scheduleReview');
     h.c.scheduleReview();
     await h.advance(30000);
     const reviews = h.effects.filter(effect => effect.type === 'review');
-    assert.equal(reviews.length, 0, 'finishing a scene must not eject the user from conversation');
-    assert.equal(h.s.reviewTimer, null);
+    assert.equal(reviews.length, 0, 'finishing a scene must not interrupt the guest');
+    assert.notEqual(h.s.reviewTimer, null);
   });
 }
 

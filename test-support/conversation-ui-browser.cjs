@@ -83,12 +83,13 @@ mkdirSync(output, { recursive: true });
     state.dialogueHistory = [];
     addDialogueMessage('user', 'Thank you.'); addDialogueMessage('luma', 'Enjoy your coffee!', 'Mia');
     syncSceneProgress(); LumaVisuals.render(); scheduleReview();
+    state.awaitingModelReply = true; // Keep a live turn open during the layout and manual-exit checks.
     clearTimeout(state.toastTimer); toast.classList.remove('is-visible');
   });
   await page.waitForFunction(() => document.getElementById('backgroundPlane').getAttribute('src').includes('ready'));
   assert.ok(await page.locator('#resetButton').isHidden());
   assert.ok(await page.locator('#finishConversation').isVisible());
-  assert.equal(await page.evaluate(() => state.reviewTimer), null, 'Cafe does not schedule a forced review transition');
+  assert.notEqual(await page.evaluate(() => state.reviewTimer), null, 'Completed cafe waits for the live turn before automatic review');
   assert.ok(await page.locator('#reviewScreen').isHidden());
   await layout('complete');
   await page.click('#finishConversation');
@@ -133,13 +134,14 @@ mkdirSync(output, { recursive: true });
       addDialogueMessage('user', answer);
       addDialogueMessage('luma', safeCharacterReply(), currentTask().speaker || 'Luma');
       syncSceneProgress(); renderBreakfast(); LumaVisuals.render();
+      state.awaitingModelReply = true; // A pending response must postpone automatic review.
       clearTimeout(state.toastTimer); toast.classList.remove('is-visible');
     }, fixture);
     await page.waitForFunction(() => state.stage === 'complete'
       && document.getElementById('backgroundPlane').complete
       && document.getElementById('backgroundPlane').naturalWidth > 0);
-    assert.equal(await page.evaluate(() => state.reviewTimer), null,
-      `${fixture.sceneId} does not schedule a forced review transition`);
+    assert.notEqual(await page.evaluate(() => state.reviewTimer), null,
+      `${fixture.sceneId} waits for the live response before automatic review`);
     assert.ok(await page.locator('#experience').isVisible());
     assert.ok(await page.locator('#reviewScreen').isHidden());
     assert.ok(await page.locator('#resetButton').isHidden());

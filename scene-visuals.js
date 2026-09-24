@@ -13,7 +13,7 @@ const LumaVisuals = (() => {
         'coffee-order': { image: 'order', caption: '柜台前 · 选一杯咖啡', selected: world.drink,
           points: [point('latte', 'latte', 35, 50, 31, 14, ['latte', '拿铁']), point('americano', 'americano', 65, 50, 31, 14, ['americano', '美式'])] },
         'coffee-size': { image: 'size', caption: world.missionId === 'C03'
-          ? (world.repair?.resolved ? 'Mia 已换好 · 现在是小杯' : '取餐时 · 这杯看起来太大了')
+          ? (world.acceptedAsDelivered ? '按你的选择 · 保留这杯大杯' : world.repair?.resolved ? 'Mia 已换好 · 现在是小杯' : '取餐时 · 这杯看起来太大了')
           : '选杯型 · 小杯或大杯', selected: world.missionId === 'C03' ? world.delivered?.size : world.size,
           points: [point('small', 'small', 37, 49, 18, 13, ['small', '小杯']), point('large', 'large', 64, 46.5, 24, 19, ['large', '大杯'])] },
         'coffee-service': { image: 'service', caption: '选喝法 · 堂食或带走', selected: world.service,
@@ -48,7 +48,8 @@ const LumaVisuals = (() => {
     if (world.missionId === 'C03' && world.delivered) {
       const expected = orderLabel(world);
       const actual = orderLabel(world.delivered);
-      return world.repair?.resolved ? `已修正 · ${actual}` : `你点的是 ${expected} · 收到的是 ${actual}`;
+      return world.acceptedAsDelivered ? `已保留 · ${actual}`
+        : world.repair?.resolved ? `已修正 · ${actual}` : `你点的是 ${expected} · 收到的是 ${actual}`;
     }
     return orderLabel(world);
   }

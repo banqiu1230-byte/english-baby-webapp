@@ -105,7 +105,7 @@ const COFFEE_MISSION_PROGRESS_KEY = 'luma-coffee-quest-v1';
 const COFFEE_MISSION_UI = Object.freeze({
   C01: { title: '第一次自己点咖啡', brief: '这一关会给你足够帮助。说一个词也能继续，最后再试着连起来。', mode: 'guided' },
   C02: { title: '替朋友点对那一杯', brief: '朋友要一杯小杯拿铁，带走。缺什么，Mia 才会继续问什么。', mode: 'guided' },
-  C03: { title: '发现错单，马上修正', brief: '你点了小杯，拿到的却是大杯。说清哪里不对，让 Mia 换回来。', mode: 'repair' },
+  C03: { title: '拿到的咖啡，好像不太对', brief: '你原本点了小杯，拿到的却是大杯。可以换回小杯，也可以留下这杯。', mode: 'repair' },
   C04: { title: '独立挑战', brief: '这次默认不显示字幕，也不给完整答案。听不清仍可以主动请求重复。', mode: 'challenge' },
 });
 
@@ -228,6 +228,7 @@ const SCENE_CONFIGS = {
 // Let the learner absorb a complete acknowledgment before the next prompt.
 // This quiet period starts only after the current voice turn has settled.
 const TASK_ADVANCE_DWELL_MS = 1600;
+const FINAL_REVIEW_DWELL_MS = 5000;
 const LEARNING_PROFILE_KEY = 'luma-learning-profile-v1';
 const TURN_PHASE = Object.freeze({
   PRESENTING: 'presenting',
@@ -573,7 +574,8 @@ function renderCoffeeMissionResult() {
     item.sessionId === globalThis.LumaExperience.currentSession() && item.outcome === 'success' && item.taskId !== 'coffee-thanks') || [];
   const independentVoice = attempts.length > 0 && attempts.every(item => item.productionCondition === 'independent');
   document.querySelector('#missionResultCode').textContent = `咖啡店任务 ${state.coffeeMissionId}`;
-  document.querySelector('#missionResultTitle').textContent = state.coffeeMissionId === 'C03' ? '错单已经修正' : '这杯咖啡，点成了';
+  document.querySelector('#missionResultTitle').textContent = state.coffeeMissionId === 'C03'
+    ? state.coffee.acceptedAsDelivered ? '这杯咖啡，就留下了' : '错单已经修正' : '这杯咖啡，点成了';
   document.querySelector('#missionResultCopy').textContent = independentVoice
     ? '关键意思由你用英语说清了。可以换个地方，再用一次。'
     : '你完成了这次真实任务；中文或提示都会如实保留，下次可以少借助一点再试。';
@@ -1061,6 +1063,7 @@ function finalizeLearnerTranscript(transcript, { turn = state.activeVoiceTurn } 
     clearTimeout(state.advanceTimer); state.advanceTimer = null;
     clearTimeout(state.reviewTimer); state.reviewTimer = null;
     clearIdleNudge();
+    if (state.stage === 'complete') scheduleReview();
   }
   if (!turn.superseded && !turn.responseStarted && (!state.expectedResponse || state.expectedResponse.turnId === turn.id)) {
     if (!state.expectedResponse) beginExpectedResponse('user', { questionId: turn.itemId, turnId: turn.id });
@@ -3533,8 +3536,27 @@ function scheduleTaskAdvance(nextTaskIndex) {
 
 function scheduleReview() {
   clearReviewTransition();
-  // Background goals may be complete while the learner still wants to talk.
-  // The visible End conversation button is the only forward exit in every scene.
+  const session = state.practiceSession;
+  let quietSince = null, lastTurn = '';
+  const afterConversation = () => {
+    state.reviewTimer = null;
+    if (session !== state.practiceSession || state.stage !== 'complete' || !state.sceneStarted
+      || !experience.classList.contains('is-active')) return;
+    const latest = state.dialogueHistory.at(-1);
+    const turn = `${state.characterTurnId}:${latest?.id}:${latest?.revision}:${latest?.text}`;
+    if (turn !== lastTurn) { lastTurn = turn; quietSince = null; }
+    // Finish only after the spoken exchange settles, never over a voice turn
+    // or a question the character has just asked the learner.
+    if (isConversationTurnPending() || document.visibilityState === 'hidden'
+      || (latest?.speaker === 'luma' && DialogueRules.isQuestion(latest.text))
+      || (latest?.speaker === 'user' && latest.final === false)) quietSince = null;
+    else {
+      if (quietSince === null) quietSince = Date.now();
+      if (Date.now() - quietSince >= FINAL_REVIEW_DWELL_MS) { showReview(); return; }
+    }
+    state.reviewTimer = setTimeout(afterConversation, 180);
+  };
+  afterConversation();
 }
 
 function completeMultimodalTask({ waitForDuplexReply = false } = {}) {

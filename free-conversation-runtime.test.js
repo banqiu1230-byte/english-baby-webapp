@@ -28,7 +28,7 @@ function sceneHarness(fixture) {
   const goal = {};
   const tasks = fixture.tasks.map(task => ({ ...task }));
   h = harness({
-    TASK_ADVANCE_DWELL_MS: 2600, FINAL_REVIEW_DWELL_MS: 3200,
+    TASK_ADVANCE_DWELL_MS: 2600,
     currentSceneConfig: () => ({ tasks }), currentGoalRecord: () => goal,
     LumaExperience: {
       noteAnswer(context, outcome) { h.effects.push({ type: 'evidence', outcome, answer: context.answer }); },
@@ -150,15 +150,16 @@ for (const fixture of sceneCases) {
     if (fixture.scene === 'kitchen') assert.equal(h.s.breakfast.drink, 'milk');
   });
 
-  test(`${fixture.scene}: finishing the hidden objectives never auto-closes the conversation`, async () => {
+  test(`${fixture.scene}: finishing the hidden objectives waits for an unanswered NPC question`, async () => {
     const h = sceneHarness(fixture);
     h.s.stage = 'complete'; h.s.speechDone = true;
     h.s.coveredGoals = new Set(fixture.tasks.map(task => task.id));
+    h.s.dialogueHistory.push({ speaker: 'luma', text: 'How is your day?', final: true });
     h.c.scheduleReview();
     await h.advance(60000);
     assert.equal(h.effects.some(effect => effect.type === 'review'), false);
     assert.equal(h.s.sceneStarted, true);
-    assert.equal(h.s.reviewTimer, null);
+    assert.notEqual(h.s.reviewTimer, null);
     finalTranscript(h, 'How is your day?', 'after-completion');
     assert.equal(h.s.conversationFocus, 'chat');
     assert.equal(h.s.dialogueHistory.at(-1).text, 'How is your day?');
