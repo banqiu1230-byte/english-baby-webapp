@@ -55,7 +55,8 @@ mkdirSync(output, { recursive: true });
       });
       checks.push({ label, sceneId, width, height, ...result });
       assert.equal(result.title, title);
-      assert.ok(result.progressHidden && result.missionHidden);
+      assert.ok(result.progressHidden);
+      assert.equal(result.missionHidden, sceneId !== 'coffee');
       if (sceneId === 'coffee') assert.ok(result.slotsVisible && result.keywords > 0 && result.headroom,
         JSON.stringify(checks.at(-1)));
       assert.ok(result.noOverflow && result.noOverlap, JSON.stringify(checks.at(-1)));

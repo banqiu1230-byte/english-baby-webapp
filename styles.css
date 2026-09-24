@@ -3524,11 +3524,14 @@ html, body { background: #e9e4dd; }
 }
 
 
-/* The conversation names the person and place; learning steps stay backstage. */
-.experience #sceneProgress, .experience #missionHud { display: none !important; }
+/* One line gives the visit a purpose; scoring and internal steps stay backstage. */
+.experience #sceneProgress { display: none !important; }
+.experience .mission-hud { gap: 8px; }
+.experience .mission-hud > span { padding: 0; border-radius: 0; color: #817363; background: none; font-size: 11px; font-weight: 500; letter-spacing: 0; }
+.experience .mission-hud > strong { font-size: 12px; font-weight: 600; line-height: 18px; }
 .experience-topbar { grid-template-columns: 44px minmax(0, 1fr) 44px auto; }
 .experience-topbar .scene-top-status { gap: 0; padding-inline: 2px; }
 .experience-topbar .learning-stage-label { font-weight: 500; line-height: 17px; }
 .experience-topbar > #finishConversation { width: auto; min-width: 74px; min-height: 44px; padding: 0 11px; border-radius: 22px; font-size: 12px; font-weight: 500; white-space: nowrap; }
 .experience-topbar:has(#finishConversation:not([hidden])) > #resetButton { display: none; }
-.scene[data-scene="coffee"] .order-slots { margin-top: 0; }
+.scene[data-scene="coffee"] .order-slots { margin-top: 6px; }

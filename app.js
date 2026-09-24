@@ -103,10 +103,10 @@ try {
 
 const COFFEE_MISSION_PROGRESS_KEY = 'luma-coffee-quest-v1';
 const COFFEE_MISSION_UI = Object.freeze({
-  C01: { title: '第一次自己点咖啡', brief: '这一关会给你足够帮助。说一个词也能继续，最后再试着连起来。', mode: 'guided' },
-  C02: { title: '替朋友点对那一杯', brief: '朋友要一杯小杯拿铁，带走。缺什么，Mia 才会继续问什么。', mode: 'guided' },
-  C03: { title: '拿到的咖啡，好像不太对', brief: '你原本点了小杯，拿到的却是大杯。可以换回小杯，也可以留下这杯。', mode: 'repair' },
-  C04: { title: '独立挑战', brief: '这次默认不显示字幕，也不给完整答案。听不清仍可以主动请求重复。', mode: 'challenge' },
+  C01: { title: '第一次自己点咖啡', goal: '给自己点一杯喜欢的咖啡', brief: '这一关会给你足够帮助。说一个词也能继续，最后再试着连起来。', mode: 'guided' },
+  C02: { title: '替朋友点对那一杯', goal: '朋友想要小杯拿铁，带走', brief: '朋友要一杯小杯拿铁，带走。缺什么，Mia 才会继续问什么。', mode: 'guided' },
+  C03: { title: '拿到的咖啡，好像不太对', goal: '拿到大杯，可换小杯或留下', brief: '你原本点了小杯，拿到的却是大杯。可以换回小杯，也可以留下这杯。', mode: 'repair' },
+  C04: { title: '独立挑战', goal: '自己完成一次咖啡点单', brief: '这次默认不显示字幕，也不给完整答案。听不清仍可以主动请求重复。', mode: 'challenge' },
 });
 
 function loadCoffeeMissionProgress() {
@@ -542,8 +542,8 @@ function syncCoffeeMissionHud() {
   if (!isCoffee) return;
   const mission = coffeeMissionMeta();
   const tasks = currentSceneConfig().tasks;
-  missionHudCode.textContent = `任务 ${state.coffeeMissionId}`;
-  missionHudTitle.textContent = mission.title;
+  missionHudCode.textContent = '任务';
+  missionHudTitle.textContent = COFFEE_MISSION_UI[state.coffeeMissionId]?.goal || mission.title;
   missionHudProgress.textContent = `${Math.min(state.taskIndex + 1, tasks.length)} / ${tasks.length}`;
   orderSlots.setAttribute('aria-label', state.coffeeMissionId === 'C03' ? '实际收到的咖啡' : '你的点单');
   const order = coffeeOrderState();
@@ -1814,7 +1814,7 @@ function openSheet(sceneName, trigger = document.activeElement, missionId = null
   const missionGoals = {
     C01: '点一杯自己喜欢的咖啡',
     C02: '小杯拿铁，带走',
-    C03: '发现杯型不对，并请 Mia 换回来',
+    C03: '杯型不对，可以换小杯或留下',
     C04: '不看字幕，独立完成一张新订单',
   };
   const available = data.available && (!requestedMission || coffeeMissionIsUnlocked(requestedMission));
