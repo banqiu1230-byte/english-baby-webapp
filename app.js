@@ -178,18 +178,9 @@ const SCENES = {
 
 const KITCHEN_TASKS = Breakfast.tasks;
 
-const AIRPORT_TASKS = [
-  { id: 'ticket', interaction: 'speech', requiresAction: false, prompt: 'May I see your ticket?', hint: '直接说 Here you are；不用点击登机牌。' },
-  { id: 'bag', interaction: 'speech', requiresAction: false, prompt: 'Is this your bag?', hint: '直接回答 Luma，不需要点击行李箱。' },
-  { id: 'gate-a12', interaction: 'speech', requiresAction: false, prompt: 'Which gate are you going to?', hint: '说 A12 就可以；不用在画面里找按钮。' },
-];
+const AIRPORT_TASKS = SceneDialogue.tasksFor('airport');
 
-const OFFICE_TASKS = [
-  { id: 'office-purpose', interaction: 'speech', requiresAction: false, speaker: '前台', prompt: 'Who are you here to see?', hint: '告诉前台你来见谁；不需要照着固定句子说。' },
-  { id: 'office-signin', interaction: 'speech', requiresAction: false, speaker: '前台', prompt: 'What is your name, please?', hint: '告诉前台你的名字，例如 My name is Li。' },
-  { id: 'office-wait', interaction: 'none', requiresAction: false, requiresSpeech: false, autoAdvance: true, speaker: '前台', prompt: 'You can wait here for Maya.', hint: '这一句只需要听懂，情境会自己继续。' },
-  { id: 'office-greeting', interaction: 'speech', requiresAction: false, speaker: 'Maya', prompt: "Hi, I'm Maya. Nice to meet you.", hint: '自然回应 Maya 的问候即可，不设唯一答案。' },
-];
+const OFFICE_TASKS = SceneDialogue.tasksFor('office');
 
 const SCENE_CONFIGS = {
   coffee: {
@@ -1111,27 +1102,14 @@ function stageTransitionUtterance(text, turn, message) {
   const tasks = currentSceneConfig().tasks;
   const nextTaskIndex = tasks.findIndex((candidate, index) => index > state.taskIndex && !state.coveredGoals.has(candidate.id));
   const nextTask = tasks[nextTaskIndex];
-  if (!nextTask || DialogueRules.isConversationOnly(text, turn.context?.question)) return false;
-  let advancesNextTask = false;
-  if (state.selectedScene === 'coffee') {
-    const engineStep = Coffee.nextMissionStep?.(state.coffee);
-    if (engineStep?.taskId !== nextTask.id) return false;
-    const preview = Coffee.advanceMission(state.coffee, text, { expectedRevision: state.coffee?.revision, question: turn.context?.question });
-    // An explicit change of mind or an early detail still belongs to this
-    // order, even when it changes a field other than the next missing one.
-    // Rebind it to the next active step so the ordinary order commit can
-    // apply it and ask only for the detail that remains missing.
-    advancesNextTask = preview.accepted
-      && (preview.changedFields || []).some(field => coffeeTaskForChangedField(field));
-  } else if (Breakfast.isTask(nextTask.id)) {
-    advancesNextTask = Boolean(Breakfast.choiceFromText(nextTask.id, text, turn.context?.question));
-  } else {
-    // A short yes or a bare name belongs to the actual question. Don't
-    // reinterpret social agreement as a bag answer or sign-in for the next step.
-    advancesNextTask = DialogueRules.matchesTask(nextTask.id, text)
-      && normalizedSpeech(turn.context?.question) === normalizedSpeech(nextTask.prompt);
-  }
-  if (!advancesNextTask) return false;
+  if (!nextTask) return false;
+  // The same interpreter handles normal replies and replies between steps.
+  // A transition changes when we commit, never what the user's words mean.
+  const preview = SceneDialogue.evaluate(sceneTurnInput(turn.context?.question, text, {
+    ...turn.context, taskId: nextTask.id,
+    questionMatchesTask: normalizedSpeech(turn.context?.question) === normalizedSpeech(nextTask.prompt),
+  }));
+  if (preview.kind !== 'decision' || !preview.changedTaskIds.length) return false;
   stopSpeechPlayback();
   state.pendingTransitionUtterance = {
     practiceSession: state.practiceSession,
@@ -1490,15 +1468,24 @@ function fallbackMeaningFeedback(answer, taskId) {
   };
 }
 
+function sceneTurnInput(question, answer, context = {}) {
+  const sceneId = context.sceneId || state.selectedScene;
+  const world = state[SceneDialogue.worldKey(sceneId)] || {};
+  return {
+    sceneId, taskId: context.taskId || currentTask().id, world, question, answer,
+    eventId: context.messageId ? `${context.evidenceSessionId || context.practiceSession || state.practiceSession}:${context.messageId}:${context.revision}` : '',
+    expectedRevision: world.revision,
+    questionMatchesTask: context.questionMatchesTask ?? isCurrentTaskQuestion(question),
+  };
+}
+
 function applyDynamicFeedback(feedback = {}, context = {}) {
+  if (feedback.discarded) return;
   const message = state.dialogueHistory.find(item => item.id === context.messageId);
-  if (!message || message.speaker !== 'user' || !message.final
-    || message.revision !== context.revision || message.text !== context.answer
-    || context.practiceSession !== state.practiceSession) return;
-  const reminder = state.selectedScene === 'coffee' && Coffee.orderReminderReply?.(message.text, state.coffee);
-  const sameTask = state.selectedScene === context.sceneId && currentTask().id === context.taskId
-    && state.taskIndex === context.taskIndex && (state.stage === 'active' || reminder);
-  if (!sameTask) return;
+  const reminder = message && state.selectedScene === 'coffee' && Coffee.orderReminderReply?.(message.text, state.coffee);
+  if (!SceneDialogue.isCurrentTurn({ message, context, sceneId: state.selectedScene,
+    taskId: currentTask().id, taskIndex: state.taskIndex, practiceSession: state.practiceSession,
+    stage: state.stage, allowCompleted: Boolean(reminder) })) return;
   const inputSource = context.source || 'voice';
   if (!['voice', 'speech'].includes(inputSource)) return;
   if (reminder) {
@@ -1626,49 +1613,24 @@ function applyDynamicFeedback(feedback = {}, context = {}) {
 async function requestLanguageFeedback(question, answer, turnContext = {}) {
   const context = { ...captureUserTurnContext(), ...turnContext, question, answer };
   if (!context.final || context.practiceSession !== state.practiceSession || DialogueRules.supportIntent(answer)) return;
-  if (state.selectedScene !== 'coffee' && DialogueRules.isConversationOnly(answer, question)) {
-    applyDynamicFeedback({ conversational: true }, context); return;
-  }
-  if (Breakfast.isTask(context.taskId)) {
-    const choice = Breakfast.choiceFromText(context.taskId, answer, question);
-    if (choice) { applyDynamicFeedback({ meaning_valid: true, choice }, context); return; }
-  } else if (state.selectedScene === 'coffee' && Coffee.isTask(context.taskId)) {
-    if (Coffee.isConversationOnly(answer, question)) {
-      applyDynamicFeedback({ conversational: true }, context); return;
-    }
-    const eventId = `${context.evidenceSessionId || state.practiceSession}:${context.messageId}:${context.revision}`;
-    const missionResult = Coffee.advanceMission(state.coffee, answer, { eventId, expectedRevision: state.coffee?.revision, question });
-    if (!missionResult.accepted && DialogueRules.isSmallTalk(answer)) {
-      applyDynamicFeedback({ conversational: true }, context); return;
-    }
-    if (missionResult.accepted || missionResult.handled) {
-      applyDynamicFeedback({ meaning_valid: missionResult.accepted, missionResult }, context); return;
-    }
-    // An ordinary conversational turn should not wait on a second grading
-    // request before Mia can speak. If an order is unclear, she can clarify
-    // one actual option and the next reply will be interpreted in context.
-    const asksToOrder = /\b(?:i want|i would like|i['’]d like|i['’]ll have|(?:can|could|may) i (?:have|get|order))\b|我要|我想要|我想点/i.test(answer);
-    if (!asksToOrder) { applyDynamicFeedback({ conversational: true }, context); return; }
-  } else if (isCurrentTaskQuestion(question) && DialogueRules.matchesTask(context.taskId, answer)) {
-    applyDynamicFeedback({ meaning_valid: true }, context); return;
-  }
-  // Let the realtime character answer ordinary greetings without an extra
-  // semantic API round trip or a second, forced task question. Task decisions
-  // (including a greeting to Maya or a polite farewell) take precedence.
-  if (DialogueRules.isSmallTalk(answer) && !DialogueRules.matchesTask(context.taskId, answer)) {
-    applyDynamicFeedback({ conversational: true }, context); return;
-  }
+  const input = sceneTurnInput(question, answer, context);
+  const local = SceneDialogue.evaluate(input);
+  if (local.kind !== 'unresolved') { applyDynamicFeedback(local.feedback, context); return; }
   const controller = new AbortController();
   state.pendingFeedback.add(controller);
   const timer = setTimeout(() => controller.abort(), 6500);
   try {
     const response = await fetch('/api/feedback', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, answer, sceneId: context.sceneId, taskId: context.taskId, coffee: state.coffee }),
+      body: JSON.stringify({ question, answer, sceneId: context.sceneId, taskId: context.taskId, world: input.world }),
       signal: controller.signal,
     });
     if (!response.ok) throw new Error('feedback_unavailable');
-    applyDynamicFeedback(await response.json(), context);
+    const candidate = await response.json();
+    // A model returns an interpretation, not permission to overwrite facts.
+    // Revalidate against the live world; an older revision cannot undo a newer answer.
+    const liveInput = { ...sceneTurnInput(question, answer, context), expectedRevision: input.expectedRevision };
+    applyDynamicFeedback(SceneDialogue.validateCandidate(liveInput, candidate), context);
   } catch {
     const fallback = fallbackMeaningFeedback(answer, context.taskId);
     applyDynamicFeedback(fallback.meaning_valid ? fallback : { technical_error: true }, context);
@@ -1676,11 +1638,7 @@ async function requestLanguageFeedback(question, answer, turnContext = {}) {
 }
 
 function coffeeTaskForChangedField(field) {
-  if (field === 'drink') return 'coffee-order';
-  if (field === 'size' || field === 'delivered.size') return 'coffee-size';
-  if (field === 'service') return 'coffee-service';
-  if (field === 'received') return 'coffee-thanks';
-  return null;
+  return SceneDialogue.taskForField('coffee', field);
 }
 
 function recordCoffeeMissionEvidence(result, context, utterance, source) {

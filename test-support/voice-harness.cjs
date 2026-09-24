@@ -10,6 +10,7 @@ const rules = require(path.join(root, 'dialogue-rules.js'));
 const VoiceRuntime = require(path.join(root, 'voice-runtime.js'));
 const Breakfast = require(path.join(root, 'breakfast.js'));
 const Coffee = require(path.join(root, 'coffee.js'));
+const SceneDialogue = require(path.join(root, 'scene-dialogue.js'));
 const declarations = [...app.matchAll(/^(?:async )?function (\w+)\([^]*?^\}$/gm)];
 const functions = new Map(declarations.map(match => [match[1], match[0]]));
 function sourceNumber(name) {
@@ -42,7 +43,7 @@ function harness(overrides = {}) {
     close() { this.readyState = 3; }
   }
   const sandbox = {
-    console, Promise, Set, Map, Math, Float32Array, Int16Array, Buffer, Breakfast, Coffee,
+    console, Promise, Set, Map, Math, Float32Array, Int16Array, Buffer, Breakfast, Coffee, SceneDialogue,
     isBreakfastScene: () => false, renderBreakfast() {},
     atob: value => Buffer.from(value, 'base64').toString('binary'),
     Date: class extends Date { static now() { return now; } },
@@ -101,7 +102,7 @@ function harness(overrides = {}) {
     now = end;
     for (let i = 0; i < 5; i++) await Promise.resolve();
   }
-  const shared = ['sceneVoiceIsOpen','captureUserTurnContext','setVoicePhase','liveTaskModeLabel',
+  const shared = ['sceneVoiceIsOpen','captureUserTurnContext','sceneTurnInput','setVoicePhase','liveTaskModeLabel',
     'taskNeedsAction','taskNeedsSpeech','isActionRequestLine','isActionAcknowledgement','normalizedSpeech','isCurrentTaskQuestion',
     'transcriptItemId','responseEventId','responseQuestionId','rememberBounded','beginExpectedResponse',
     'retireExpectedResponse','acceptResponseEvent','resolveLearnerBeforeReply','learnerDecisionPending',

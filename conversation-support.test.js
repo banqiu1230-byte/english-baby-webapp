@@ -199,6 +199,7 @@ test('greeted task questions still support Chinese help and instant task interpr
 
 test('an upbeat social answer is never registered as an office name', async () => {
   const h = harness();
+  h.s.selectedScene = 'office';
   Object.assign(h.task, { id: 'office-signin', prompt: 'What is your name, please?', requiresAction: false });
   h.s.activeQuestion = h.task.prompt;
   h.load('requestLanguageFeedback');

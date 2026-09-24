@@ -396,7 +396,7 @@ test('mission turns are immutable, revision checked and replay safe', () => {
 function feedbackHarness(body, parsed = {}, configured = false) {
   const source = fs.readFileSync(require.resolve('./server.js'), 'utf8');
   const responses = [], requests = [];
-  const context = vm.createContext({ Coffee, Breakfast: require('./breakfast'), DialogueRules: require('./dialogue-rules'), AbortController, setTimeout, clearTimeout,
+  const context = vm.createContext({ Coffee, Breakfast: require('./breakfast'), DialogueRules: require('./dialogue-rules'), SceneDialogue: require('./scene-dialogue'), AbortController, setTimeout, clearTimeout,
     process: { env: configured ? { DEEPSEEK_API_KEY: 'test-only' } : {} }, console: { error() {} },
     readJson: async () => body,
     sendJson: (_response, status, payload) => { responses.push({ status, payload }); },
@@ -404,7 +404,6 @@ function feedbackHarness(body, parsed = {}, configured = false) {
       json: async () => ({ choices: [{ message: { content: JSON.stringify(parsed) } }] }) }; },
   });
   vm.runInContext([
-    source.match(/^const SCENE_GOALS = \{[^]*?^\};/m)[0],
     source.match(/^function cleanText\([^]*?^\}$/m)[0],
     source.match(/^async function handleLanguageFeedback\([^]*?^\}$/m)[0],
   ].join('\n'), context);
@@ -451,9 +450,12 @@ test('backend rejects yes to two choices and accepts yes to an actual single off
 
 test('backend includes coffee state and constrains a natural choice to the current step', async () => {
   const h = feedbackHarness({ sceneId: 'coffee', taskId: 'coffee-service', coffee: sized(),
-    question: Coffee.promptFor('coffee-service'), answer: 'I will take it with me.' }, { meaning_valid: true, choice: 'to-go' }, true);
+    question: Coffee.promptFor('coffee-service'), answer: 'I would like to take my coffee with me.' }, { meaning_valid: true, choice: 'to-go' }, true);
   await h.run();
   assert.equal(h.responses[0].payload.choice, 'to-go');
   assert.equal(h.responses[0].payload.meaning_valid, true);
-  assert.match(h.requests[0].messages[1].content, /Coffee world: Chosen coffee: latte\. Size: small/);
+  const contract = JSON.parse(h.requests[0].messages[1].content).contract;
+  assert.match(contract.facts, /latte/);
+  assert.match(contract.facts, /small/);
+  assert.deepEqual(contract.allowedChoices, ['here', 'to-go']);
 });

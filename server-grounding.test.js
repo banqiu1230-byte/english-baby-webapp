@@ -18,7 +18,7 @@ function instructions(taskId, world = Coffee.initial(), flowState = 'active', pr
 
 function feedback(body, parsed = {}) {
   const responses = [], requests = [];
-  const context = vm.createContext({ Coffee, Breakfast, DialogueRules, AbortController, setTimeout, clearTimeout,
+  const context = vm.createContext({ Coffee, Breakfast, DialogueRules, SceneDialogue: require('./scene-dialogue'), AbortController, setTimeout, clearTimeout,
     process: { env: { DEEPSEEK_API_KEY: 'test-only' } }, console: { error() {} },
     readJson: async () => body,
     sendJson: (_response, status, payload) => responses.push({ status, payload }),
@@ -28,7 +28,6 @@ function feedback(body, parsed = {}) {
     },
   });
   vm.runInContext([
-    source.match(/^const SCENE_GOALS = \{[^]*?^\};/m)[0],
     source.match(/^function cleanText\([^]*?^\}$/m)[0],
     source.match(/^async function handleLanguageFeedback\([^]*?^\}$/m)[0],
   ].join('\n'), context);
@@ -223,6 +222,16 @@ test('breakfast accepts real short responses without an additional model request
     assert.equal(h.responses[0].payload.choice, choice, answer);
     assert.equal(h.requests.length, 0, answer);
   }
+});
+
+test('an older breakfast client cannot supply its unrelated coffee order as breakfast facts', async () => {
+  const h = feedback({ sceneId: 'kitchen', taskId: 'breakfast-drink',
+    question: 'Do you want milk or water?', answer: 'Milk.',
+    coffee: { drink: 'latte', size: 'small', service: 'here', received: true } });
+  await h.run();
+  assert.equal(h.responses[0].payload.meaning_valid, true);
+  assert.equal(h.responses[0].payload.choice, 'milk');
+  assert.equal(h.requests.length, 0);
 });
 
 test('past-visit context is validated and separate from the current order', () => {
