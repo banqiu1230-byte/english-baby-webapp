@@ -1117,8 +1117,12 @@ function stageTransitionUtterance(text, turn, message) {
     const engineStep = Coffee.nextMissionStep?.(state.coffee);
     if (engineStep?.taskId !== nextTask.id) return false;
     const preview = Coffee.advanceMission(state.coffee, text, { expectedRevision: state.coffee?.revision, question: turn.context?.question });
+    // An explicit change of mind or an early detail still belongs to this
+    // order, even when it changes a field other than the next missing one.
+    // Rebind it to the next active step so the ordinary order commit can
+    // apply it and ask only for the detail that remains missing.
     advancesNextTask = preview.accepted
-      && (preview.changedFields || []).map(coffeeTaskForChangedField).includes(nextTask.id);
+      && (preview.changedFields || []).some(field => coffeeTaskForChangedField(field));
   } else if (Breakfast.isTask(nextTask.id)) {
     advancesNextTask = Boolean(Breakfast.choiceFromText(nextTask.id, text, turn.context?.question));
   } else {
@@ -1139,10 +1143,8 @@ function stageTransitionUtterance(text, turn, message) {
   };
   message.status = '已听到 · 下一步出现后确认';
   renderDialogue();
-  if (state.conversationFocus === 'chat') {
-    state.conversationFocus = 'task';
-    scheduleTaskAdvance(nextTaskIndex);
-  }
+  state.conversationFocus = 'task';
+  scheduleTaskAdvance(nextTaskIndex);
   return true;
 }
 
@@ -3102,19 +3104,17 @@ function startTask(index, { speakAgain = true } = {}) {
       ? globalThis.LumaSceneMemory?.returnGreeting(state.previousVisit) : '';
     const opening = state.dialogueHistory.length === 0
       ? returnGreeting || DialogueRules.openingLine(task.id, task.prompt) : task.prompt;
-    showPendingTaskPrompt(opening);
     if (hasTransitionUtterance) {
-      const promptMessage = state.dialogueHistory.findLast(item => item.pendingPlayback && item.taskId === task.id);
-      if (promptMessage) {
-        delete promptMessage.pendingPlayback;
-        promptMessage.status = '已听到你刚才的回答 · 正在接上';
-        renderDialogue();
-      }
+      // Process the answer already heard before presenting another question.
+      // It may change the drink or fill this step, making the old prompt wrong.
       state.promptTimer = setTimeout(() => {
         state.promptTimer = null;
         consumeTransitionUtterance();
       }, 180);
-    } else scheduleTaskPrompt(task.id, state.duplexReady ? 180 : 2600);
+    } else {
+      showPendingTaskPrompt(opening);
+      scheduleTaskPrompt(task.id, state.duplexReady ? 180 : 2600);
+    }
   }
   globalThis.LumaExperience?.taskStarted();
   ensureSceneVoiceIsOpen();

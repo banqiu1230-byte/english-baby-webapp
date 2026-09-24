@@ -113,10 +113,12 @@ test('a coffee help result never cancels the natural reply to repeat the task pr
 test('a clear next-step answer spoken during the previous acknowledgment is rebound once', () => {
   const tasks = Coffee.tasks.map(task => ({ ...task }));
   const h = harness({
+    TASK_ADVANCE_DWELL_MS: 1600,
     currentSceneConfig: () => ({ tasks }),
     requestLanguageFeedback: (question, answer, context) => h.effects.push({ type: 'rebound', question, answer, context }),
   });
-  h.load('coffeeTaskForChangedField', 'stageTransitionUtterance', 'consumeTransitionUtterance');
+  h.load('coffeeTaskForChangedField', 'stageTransitionUtterance', 'consumeTransitionUtterance',
+    'latestFollowupText', 'scheduleTaskAdvance');
   h.s.selectedScene = 'coffee';
   h.s.coffee = Coffee.advanceMission(Coffee.missionInitial('C01'), 'Americano.').world;
   h.s.coffeeMissionId = 'C01';

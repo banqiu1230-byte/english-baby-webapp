@@ -472,6 +472,14 @@ const Coffee = (() => {
     if (/^(?:yes|yeah|yep|okay|ok|sure|好|好的|嗯|可以)(?: please)?$/.test(clean)) return { ...empty, kind: 'ambiguous' };
     const gratitude = !/^(?:no thanks|不用谢|不 谢谢)$/.test(clean)
       && /\b(?:thanks|thank you)(?: very much| so much| a lot)?\b|^(?:you too|have a (?:nice|good|lovely) day)$|谢谢(?:你)?/.test(clean);
+    // A new, explicit request is enough to change an order. Guests should not
+    // need a special correction word such as "actually" to be understood.
+    // Keep bare mentions and descriptions separate from service requests.
+    const requestedItem = '(?:(?:a|an|the) )?(?:(?:small|large|big|little)(?: (?:one|cup|coffee|latte|americano))?|latte|americano)(?: (?:for here|to go))?';
+    const requestedService = '(?:(?:it|that) )?(?:for here|to go)';
+    const directRequest = new RegExp(`^(?:(?:hi|hello|hey|good morning|good afternoon|good evening)(?: mia)? )?(?:i (?:want|would like)|id like|ill (?:have|take)|i will (?:have|take)|(?:can|could|may) i (?:have|get|order)) (?:${requestedItem}|${requestedService})(?: please| thanks| thank you)?$`).test(clean)
+      || /^(?:(?:我)?(?:要|想要|想点)|(?:请)?给我)(?:一杯)?(?:(?:小杯|大杯)(?:拿铁|美式(?:咖啡)?)?|拿铁|美式(?:咖啡)?)(?:\s*(?:堂食|带走|打包))?(?:吧|就好|谢谢)?$/.test(clean)
+      || new RegExp(`^${requestedItem} please$`).test(clean);
     let explicitCorrection = /\b(?:actually|sorry|instead|rather|change|changed|make (?:that|it)|i mean|i said|correction|no|not|dont|do not|should be|ordered|asked for)\b|改成|改为|换成|不是|不要|不想要|不对|说错|应该是|其实|还是|我点的是|我要换|(?:^|\s)不(?:\s|$)/.test(clean);
     let repairIntent = explicitCorrection
       || /\b(?:wrong|mistake|isnt right|is not right|thats not right|not what i ordered)\b|错了|不对|不是我点的/.test(clean);
@@ -498,7 +506,7 @@ const Coffee = (() => {
     const hasRejectedChoice = ORDER_FIELDS.some(field => candidates[field].some(candidate => candidate.negated));
     const kind = ambiguousFields.length ? 'ambiguous' : Object.keys(slots).length ? 'order'
       : gratitude ? 'gratitude' : hasRejectedChoice ? 'negated' : 'empty';
-    return { slots, explicitCorrection, repairIntent, gratitude, help: null, ambiguousFields,
+    return { slots, explicitCorrection, explicitRequest: directRequest, repairIntent, gratitude, help: null, ambiguousFields,
       intendedSlots, observedSlots, language, kind };
   }
 
@@ -637,7 +645,7 @@ const Coffee = (() => {
       reason: interpretation.gratitude ? 'not-ready' : interpretation.kind === 'question' ? 'question' : 'no-decision', interpretation });
     const explicitlyAllowed = new Set(Array.isArray(options.allowCorrectionFields) ? options.allowCorrectionFields : []);
     const conflicts = entries.filter(([field, value]) => state[field] && state[field] !== value);
-    const blocked = conflicts.filter(([field]) => !interpretation.explicitCorrection
+    const blocked = conflicts.filter(([field]) => !interpretation.explicitCorrection && !interpretation.explicitRequest
       && !explicitlyAllowed.has(field));
     if (blocked.length) return missionResult(state, { handled: true, reason: 'correction-needs-signal',
       pendingCorrections: blocked.map(([field, value]) => ({ field, from: state[field], to: value })), interpretation });
