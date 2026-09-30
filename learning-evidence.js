@@ -55,11 +55,21 @@
     if (!id || !sceneId || !startedAt) return null;
     return {
       id, sceneId, mode: identifier(input.mode) || 'guided',
+      scope: ['life-event', 'target-practice'].includes(input.scope) ? input.scope : null,
+      supersededAt: timestamp(input.supersededAt),
       missionId: identifier(input.missionId), variantId: identifier(input.variantId),
       challengeType: enumValue(challengeTypes, input.challengeType),
       promptModality: enumValue(promptModalities, input.promptModality),
       startedAt, completedAt: timestamp(input.completedAt),
     };
+  }
+
+  function cleanStudy(input) {
+    if (!input || typeof input !== 'object') return null;
+    const id = identifier(input.id), sceneId = identifier(input.sceneId), taskId = identifier(input.taskId);
+    const targetId = identifier(input.targetId), at = timestamp(input.at);
+    if (!id || !sceneId || !taskId || !targetId || !at || !['keyword', 'full-example', 'meaning', 'replay'].includes(input.kind)) return null;
+    return { id, sceneId, taskId, targetId, at, kind: input.kind };
   }
 
   function cleanExposure(input, sessions, fallbackAt) {
@@ -180,10 +190,11 @@
 
   function cleanCheckpoint(input, sessions, fallbackAt) {
     if (!input || typeof input !== 'object') return null;
-    const session = sessions.find(item => item.id === input.sessionId && item.sceneId === input.sceneId && !item.completedAt);
+    const session = sessions.find(item => item.id === input.sessionId && item.sceneId === input.sceneId
+      && !item.completedAt && !item.supersededAt && item.scope !== 'target-practice');
     if (!session || !Number.isInteger(input.taskIndex) || input.taskIndex < 0) return null;
-    if (['coffee', 'kitchen'].includes(session.sceneId)) {
-      // A café mission is the recovery unit. Older checkpoints may contain a
+    if (['coffee', 'kitchen', 'airport', 'office'].includes(session.sceneId)) {
+      // A small life event is the recovery unit. Older checkpoints may contain a
       // partly completed order; keep its mission and variant, but restart its
       // dialogue from the first question on the next visit.
       const missionIds = ['C01', 'C02', 'C03', 'C04'];
@@ -192,7 +203,7 @@
       return {
         sessionId: session.id, sceneId: session.sceneId, taskIndex: 0,
         practiceMode: identifier(input.practiceMode) || session.mode,
-        missionId: session.sceneId === 'coffee' ? missionId : null,
+        missionId: session.sceneId === 'coffee' ? missionId : session.missionId,
         variantId: session.sceneId === 'coffee' ? (identifier(input.variantId) || identifier(input.coffee?.variantId) || session.variantId) : null,
         at: timestamp(input.at) || fallbackAt,
       };
@@ -232,7 +243,7 @@
     } catch { /* A non-serializable UI field must not interrupt learning. */ }
     return { sessionId: session.id, sceneId: session.sceneId, taskIndex: input.taskIndex,
       practiceMode: identifier(input.practiceMode) || session.mode,
-      missionId: identifier(input.missionId) || session.missionId,
+      missionId: session.sceneId === 'interview' ? session.missionId : identifier(input.missionId) || session.missionId,
       variantId: identifier(input.variantId) || session.variantId,
       breakfast: { drink, cupPlaced, amount: cupPlaced && ['more', 'enough'].includes(world.amount) ? world.amount : null },
       ...(coffee ? { coffee } : {}),
@@ -258,7 +269,7 @@
       catch { storageAvailable = false; return null; }
     };
     const raw = read(STORAGE_KEY);
-    const profile = { version: 1, evidenceVersion: EVIDENCE_VERSION, sessions: [], exposures: [], attempts: [],
+    const profile = { version: 1, evidenceVersion: EVIDENCE_VERSION, sessions: [], exposures: [], attempts: [], studies: [],
       // `checkpoint` remains the most-recent recovery point for older callers.
       // `checkpoints` keeps independent recovery points when a learner visits
       // another scene before finishing the current one.
@@ -280,6 +291,10 @@
         const index = profile.attempts.findIndex(item => item.id === attempt.id);
         if (index < 0) profile.attempts.push(attempt);
         else if (sameAttemptOwner(profile.attempts[index], attempt)) profile.attempts[index] = attempt;
+      }
+      for (const input of Array.isArray(raw.studies) ? raw.studies : []) {
+        const study = cleanStudy(input);
+        if (study && !profile.studies.some(item => item.id === study.id)) profile.studies.push(study);
       }
       for (const input of Array.isArray(raw.checkpoints) ? raw.checkpoints : []) {
         const checkpoint = cleanCheckpoint(input, profile.sessions, currentTime());
@@ -328,16 +343,27 @@
         && a.targetId === b.targetId && a.kind === b.kind;
     }
 
-    function beginSession({ sceneId = 'kitchen', mode = 'guided', resumeId, missionId, variantId,
+    function beginSession({ sceneId = 'kitchen', mode = 'guided', resumeId, missionId, variantId, scope,
       challengeType = 'unknown', promptModality = 'unknown' } = {}) {
       if (!identifier(sceneId)) return null;
-      const resumed = profile.sessions.find(session => session.id === resumeId && session.sceneId === sceneId && !session.completedAt);
+      const resumed = profile.sessions.find(session => session.id === resumeId && session.sceneId === sceneId
+        && !session.completedAt && !session.supersededAt && (scope == null || session.scope === scope)
+        && (missionId == null || session.missionId === identifier(missionId)));
       if (resumed) return resumed.id;
       const at = currentTime();
+      const sessionScope = ['life-event', 'target-practice'].includes(scope) ? scope : null;
+      if (sessionScope === 'life-event') {
+        for (const prior of profile.sessions) {
+          if (prior.sceneId === sceneId && (prior.missionId || null) === (identifier(missionId) || null)
+            && !prior.completedAt && !prior.supersededAt && prior.scope !== 'target-practice') prior.supersededAt = at;
+        }
+        profile.checkpoints = profile.checkpoints.filter(checkpoint => !profile.sessions.find(session => session.id === checkpoint.sessionId)?.supersededAt);
+        syncRecentCheckpoint();
+      }
       let id;
       do { id = `session-${Date.parse(at).toString(36)}-${++sessionSerial}-${Math.random().toString(36).slice(2, 10)}`; }
       while (profile.sessions.some(session => session.id === id));
-      profile.sessions.push({ id, sceneId: identifier(sceneId), mode: identifier(mode) || 'guided',
+      profile.sessions.push({ id, sceneId: identifier(sceneId), mode: identifier(mode) || 'guided', scope: sessionScope, supersededAt: null,
         missionId: identifier(missionId), variantId: identifier(variantId),
         challengeType: enumValue(challengeTypes, challengeType), promptModality: enumValue(promptModalities, promptModality),
         startedAt: at, completedAt: null });
@@ -416,6 +442,8 @@
       const index = profile.checkpoints.findIndex(item => item.sessionId === id);
       if (index < 0) return null;
       const [discarded] = profile.checkpoints.splice(index, 1);
+      const session = profile.sessions.find(item => item.id === id);
+      if (session && !session.completedAt) session.supersededAt = currentTime();
       syncRecentCheckpoint();
       persist();
       return copy(discarded);
@@ -423,7 +451,7 @@
 
     function completeSession({ id, sceneId, completedAt } = {}) {
       const session = profile.sessions.find(item => item.id === id && item.sceneId === sceneId);
-      if (!session) return null;
+      if (!session || session.supersededAt) return null;
       if (!session.completedAt) {
         session.completedAt = timestamp(completedAt) || currentTime();
         profile.checkpoints = profile.checkpoints.filter(checkpoint => checkpoint.sessionId !== id);
@@ -583,18 +611,27 @@
       }
       const checkpoint = getCheckpoint();
       if (checkpoint) return { kind: 'resume', sceneId: checkpoint.sceneId, sessionId: checkpoint.sessionId,
+        missionId: checkpoint.missionId, variantId: checkpoint.variantId,
         taskIndex: checkpoint.taskIndex, practiceMode: checkpoint.practiceMode, targetIds: [],
         title: '继续上次的情境', reason: '上次的进度已保存' };
       if (due.length) return nextStep({ preferReview: true });
       const completed = profile.sessions.filter(session => session.completedAt).sort((a, b) => b.completedAt.localeCompare(a.completedAt));
       return completed.length
-        ? { kind: 'continue', sceneId: completed[0].sceneId, practiceMode: 'guided', targetIds: [],
+        ? { kind: 'continue', sceneId: completed[0].sceneId, missionId: completed[0].missionId, variantId: completed[0].variantId, practiceMode: 'guided', targetIds: [],
           title: '再练一次熟悉的情境', reason: '需要时可以用提示，再尝试自己回应' }
         : { kind: 'start', sceneId: 'kitchen', practiceMode: 'guided', targetIds: [],
           title: '一起准备早餐', reason: '从有帮助的真实情境开始' };
     }
 
-    return { beginSession, recordExposure, recordAttempt, saveCheckpoint, getCheckpoint, getCheckpoints, discardCheckpoint, completeSession,
+    function recordStudy(input = {}) {
+      const study = cleanStudy({ ...input, id: input.id || `study-${Date.parse(currentTime()).toString(36)}-${++exposureSerial}-${Math.random().toString(36).slice(2, 8)}`, at: input.at || currentTime() });
+      if (!study) return null;
+      const previous = profile.studies.find(item => item.id === study.id);
+      if (previous) return copy(previous);
+      profile.studies.push(study); persist(); return copy(study);
+    }
+
+    return { beginSession, recordExposure, recordAttempt, recordStudy, saveCheckpoint, getCheckpoint, getCheckpoints, discardCheckpoint, completeSession,
       assessRetention, getAttemptEvidence, getReviewQueue, getTargetEvidence,
       summary, nextStep, getProfile: () => copy(profile) };
   }

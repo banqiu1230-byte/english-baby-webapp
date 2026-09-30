@@ -11,6 +11,7 @@ function instructions(taskId, world = Coffee.initial(), flowState = 'active', pr
   const context = vm.createContext({ Coffee, Breakfast, SceneMemory: require('./scene-memory') });
   const declarations = ['DUPLEX_TASKS', 'SCENE_FACTS'].map(name => source.match(new RegExp(`^const ${name} = \\{[^]*?^\\};`, 'm'))[0]);
   declarations.push(source.match(/^const ACTION_REQUIRED_TASKS = .*$/m)[0]);
+  declarations.push(source.match(/^function conversationFlowInstructions\([^]*?^\}$/m)[0]);
   declarations.push(source.match(/^function duplexInstructions\([^]*?^\}$/m)[0]);
   vm.runInContext(declarations.join('\n'), context);
   return context.duplexInstructions(taskId, false, false, [], flowState, [], Breakfast.initial(), world, previousVisit);
@@ -147,7 +148,7 @@ test('task transition and completion instructions preserve the open conversation
     assert.match(text, /latest conversational meaning takes priority/);
     assert.match(text, /past experience, hypothetical story, or answer to a small-talk question does not place or change an order/);
     assert.match(text, /through an explicit speech request/);
-    assert.match(text, /Do not generate or repeat that fixed acknowledgment yourself/);
+    assert.match(text, /Do not generate a fixed acknowledgment merely because progress changed/);
     assert.doesNotMatch(text, /Give one short final acknowledgment and do not open a new topic/);
     assert.doesNotMatch(text, /Use the current task acknowledgment above, then stop/);
     assert.doesNotMatch(text, /Do not ask any question/);

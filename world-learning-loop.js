@@ -1,16 +1,17 @@
 /* A small authored world loop. Recommendations never lock a scene or infer mastery. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports)
-    module.exports = factory(require('./learning-evidence'), require('./coffee'));
-  else root.LumaWorldLoop = factory(root.LumaLearning, typeof Coffee === 'undefined' ? null : Coffee);
-})(typeof globalThis !== 'undefined' ? globalThis : this, function (Learning, Coffee) {
+    module.exports = factory(require('./learning-evidence'), require('./coffee'), require('./interview'));
+  else root.LumaWorldLoop = factory(root.LumaLearning, typeof Coffee === 'undefined' ? null : Coffee, typeof Interview === 'undefined' ? root.Interview : Interview);
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (Learning, Coffee, Interview) {
   'use strict';
 
-  const SCENES = ['coffee', 'kitchen', 'airport', 'office'];
+  const SCENES = ['coffee', 'kitchen', 'airport', 'office', 'interview'];
   const MISSIONS = ['C01', 'C02', 'C03', 'C04'];
   const HELP = { subtitles: '字幕', 'transcript-history': '完整对话', meaning: '中文解释',
     replay: '重听', keyword: '关键词', 'sentence-stem': '英文半句', 'full-example': '完整示范' };
   const TARGETS = {
+    ...Object.fromEntries((Interview?.tasks || []).map(task => [task.targetId, [task.label, task.support.meaning, Array.isArray(task.keywords) ? task.keywords.join(' · ') : task.keywords]])),
     'choose-drink': ['表达饮料选择', '说出你想喝什么。', '饮品名 + please'],
     'choose-size': ['说明杯型', '告诉对方你要小杯还是大杯。', 'small / large'],
     'choose-service': ['说明堂食或带走', '告诉对方你在哪里喝。', 'for here / to go'],
@@ -46,6 +47,7 @@
   }
 
   function missionMetadata(sceneId, source = {}) {
+    if (sceneId === 'interview') return { missionId: Interview?.getMission(source.missionId)?.id || 'I01', variantId: null };
     if (sceneId !== 'coffee') return { missionId: null, variantId: null };
     const missionId = MISSIONS.includes(source.missionId) ? source.missionId : 'C01';
     const mission = Coffee?.getMission(missionId);
@@ -60,6 +62,10 @@
   }
 
   function experience(sceneId, source = {}) {
+    if (sceneId === 'interview') {
+      const mission = Interview?.getMission(source.missionId);
+      return { title: mission?.title || 'UI/UX 设计师英文面试', reason: mission?.description || '用自己的真实经历，把设计判断说清楚。' };
+    }
     if (sceneId !== 'coffee') return {
       kitchen: { title: '一起准备早餐，喝点什么？', reason: '牛奶和水已经摆好，和 Luma 聊聊这个早晨。' },
       airport: { title: '到了机场，先找工作人员', reason: '准备好登机牌，聊聊行李和登机口。' },
@@ -95,8 +101,10 @@
     const { profile, store, now } = snapshot(input, options.now);
     const checkpoint = Object.hasOwn(options, 'checkpoint') ? options.checkpoint : profile.checkpoint;
     if (checkpoint && SCENES.includes(checkpoint.sceneId)) return suggestion('resume', checkpoint.sceneId, checkpoint, {
-      ...experience(checkpoint.sceneId, checkpoint), actionLabel: '继续这件事',
-    }, { sessionId: checkpoint.sessionId || null, taskIndex: 0 });
+      ...experience(checkpoint.sceneId, checkpoint),
+      ...(checkpoint.sceneId === 'interview' ? { reason: '已保存面试进度，继续当前话题。' } : {}),
+      actionLabel: checkpoint.sceneId === 'interview' ? '继续面试练习' : '继续这件事',
+    }, { sessionId: checkpoint.sessionId || null, taskIndex: checkpoint.sceneId === 'interview' ? checkpoint.taskIndex : 0 });
 
     const due = store.getReviewQueue().filter(item => time(item.dueAt) <= now && SCENES.includes(item.lastSceneId))
       .sort((a, b) => a.dueAt.localeCompare(b.dueAt) || a.targetId.localeCompare(b.targetId));
@@ -110,6 +118,15 @@
           missionId: item.lastMissionId, variantId: item.lastVariantId, dueAt: item.dueAt })) });
     }
 
+    // Interview practice only continues after the learner explicitly enters it.
+    const lastLifeEvent = profile.sessions.filter(item => item.completedAt && item.scope === 'life-event').sort(order).at(-1);
+    if (lastLifeEvent?.sceneId === 'interview' && Interview) {
+      const done = new Set(profile.sessions.filter(item => item.sceneId === 'interview' && item.completedAt && item.scope === 'life-event').map(item => item.missionId));
+      const next = Interview.missions.find(item => !done.has(item.id)) || Interview.getMission('I07');
+      return suggestion('quest', 'interview', { missionId: next.id, mode: 'guided' }, {
+        ...experience('interview', { missionId: next.id }), actionLabel: '开始面试练习',
+      });
+    }
     const completed = profile.sessions.filter(item => item.completedAt && ['coffee', 'kitchen'].includes(item.sceneId)).sort(order);
     const latest = completed.at(-1);
     if (!latest) {
@@ -194,7 +211,8 @@
     const mission = Coffee?.getMission(meta.missionId);
     const target = mission?.variants.find(variant => variant.id === meta.variantId)?.target;
     const drink = item.sceneId === 'kitchen' ? 'Milk' : target?.drink === 'americano' ? 'An americano' : 'A latte';
-    const example = {
+    const interviewTask = item.sceneId === 'interview' ? Interview?.taskById(item.taskId) : null;
+    const example = interviewTask?.support.model || {
       'choose-drink': `${drink}, please.`,
       'choose-size': meta.missionId === 'C03' ? 'Sorry, I ordered a small.' : target?.size === 'large' ? 'Large, please.' : 'Small, please.',
       'choose-service': target?.service === 'here' ? 'For here, please.' : 'To go, please.',

@@ -83,6 +83,38 @@ test('cumulative transcript hypotheses replace text without appending duplicates
   assert.equal(h.s.dialogueHistory[0].text, 'I touch the plate.');
 });
 
+test('only the first confirmed learner speech releases reading help after owning the floor', () => {
+  let starts = 0, h;
+  h = harness({ LumaExperience: { learnerTurnStarted() {
+    starts++;
+    assert.equal(h.s.activeVoiceTurn?.confirmed, true);
+    assert.equal(h.s.expectedResponse?.kind, 'user');
+    assert.equal(h.c.isConversationTurnPending(), true, 'guidance cannot race the spoken answer');
+  } } });
+  h.c.beginLocalSpeechTurn();
+  assert.equal(starts, 0, 'VAD alone may be noise');
+  const turn = h.c.acceptTranscriptEvent({ item_id: 'read-aloud' }, { allowStart: true });
+  h.c.confirmLearnerTurn(turn, '[noise]');
+  assert.equal(starts, 0);
+  h.c.confirmLearnerTurn(turn, 'Milk');
+  h.c.updateLearnerTurn(turn, 'Milk');
+  h.c.confirmLearnerTurn(turn, 'Milk, please.');
+  h.c.finalizeLearnerTranscript('Milk, please.', { turn });
+  assert.equal(starts, 1, 'partial and final transcripts share one learner turn');
+});
+
+test('an old first hypothesis cannot release help reopened for a newer learner turn', () => {
+  let starts = 0;
+  const h = harness({ LumaExperience: { learnerTurnStarted() { starts++; } } });
+  const old = h.c.acceptTranscriptEvent({ item_id: 'old-help' }, { allowStart: true });
+  const current = h.c.acceptTranscriptEvent({ item_id: 'new-help' }, { allowStart: true });
+  h.c.confirmLearnerTurn(current, 'Plate');
+  assert.equal(starts, 1);
+  h.c.finalizeLearnerTranscript('Milk.', { turn: old });
+  assert.equal(old.superseded, true);
+  assert.equal(starts, 1);
+});
+
 test('late first recognition fills old text without interrupting a newer answer', () => {
   const h = harness(), { c, s } = h;
   const first = c.acceptTranscriptEvent({ item_id: 'old' }, { allowStart: true });
@@ -261,8 +293,9 @@ test('failed character recovery drains deferred events and releases a completed 
   assert.equal(learner, 0);
 });
 
-test('successful task cancellation drains queued speech and respects a queued request to wait', async () => {
-  for (const connected of [true, false]) {
+for (const ending of ['response.done', 'watchdog', 'disconnected watchdog']) {
+  test(`a completed task preserves its reply until ${ending}, then drains queued speech`, async () => {
+    const connected = ending !== 'disconnected watchdog';
     const nextTasks = [];
     const h = harness({
       TASK_ADVANCE_DWELL_MS: 2600,
@@ -274,7 +307,8 @@ test('successful task cancellation drains queued speech and respects a queued re
     });
     h.c.apple = h.c.scene;
     h.s.taskIndex = 0;
-    h.load('completeMultimodalTask', 'clearTaskAdvance', 'scheduleTaskAdvance', 'latestFollowupText');
+    h.load('completeMultimodalTask', 'clearTaskAdvance', 'scheduleTaskAdvance', 'latestFollowupText',
+      'handleConversationSupport', 'clearReviewTransition', 'finishDuplexTurnWhenAudioEnds', 'finishDuplexAudioOutput');
     if (connected) {
       const ready = h.c.connectDuplexSession();
       await h.s.duplexSocket.onmessage({ data: '{"type":"session.created"}' });
@@ -282,7 +316,10 @@ test('successful task cancellation drains queued speech and respects a queued re
     }
     h.c.beginExpectedResponse('user');
     Object.assign(h.s.expectedResponse, { responseId: 'old-response', audioStarted: true });
-    Object.assign(h.s, { duplexSpeaking: true, duplexAcceptAudio: true });
+    const response = h.s.expectedResponse;
+    Object.assign(h.s, { duplexSpeaking: true, duplexAcceptAudio: true,
+      duplexSubtitleReady: true, lastDuplexAudioAt: h.now(), lumaStartedAt: h.now() });
+    h.c.armCharacterTurnWatchdog();
     const context = h.c.captureUserTurnContext();
     for (const event of [
       { type: 'conversation.item.input_audio_transcription.started', item_id: 'queued' },
@@ -291,13 +328,29 @@ test('successful task cancellation drains queued speech and respects a queued re
     ]) h.s.deferredVoiceEvents.push({ data: JSON.stringify(event), context });
     assert.equal(h.c.completeMultimodalTask(), true);
     assert.equal(h.s.stage, 'task-complete');
+    assert.equal(h.s.expectedResponse, response);
+    assert.equal(h.s.deferredVoiceEvents.length, 3, 'speech captured during the reply remains queued until it finishes');
+    assert.deepEqual(nextTasks, [], 'committing evidence must not advance through the live reply');
+    if (ending === 'response.done') {
+      await h.s.duplexSocket.onmessage({ data: JSON.stringify({ type: 'response.done', response_id: 'old-response' }) });
+      await h.advance(160);
+    } else {
+      await h.advance(7999);
+      assert.equal(h.s.expectedResponse, response);
+      assert.equal(h.s.deferredVoiceEvents.length, 3);
+      await h.advance(1);
+    }
     assert.equal(h.s.deferredVoiceEvents.length, 0);
+    if (connected) {
+      assert.ok(h.s.dialogueHistory.some(message => message.text === 'Actually, wait.' && message.final));
+      assert.equal(h.s.conversationFocus, 'chat', 'the queued wait request must pause the completed task');
+      assert.equal(h.effects.filter(effect => effect.type === 'feedback').length, 0, 'waiting is support, not a scored answer');
+    }
     await h.advance(15000);
     assert.deepEqual(nextTasks, connected ? [] : [1], connected ? 'the audible wait request pauses advancement' : 'no new learner turn blocks ordinary advancement');
     assert.equal(h.c.isConversationTurnPending(), false);
-    if (connected) assert.ok(h.s.dialogueHistory.some(message => message.text === 'Actually, wait.' && message.final));
-  }
-});
+  });
+}
 
 test('response.done is a terminal fallback when audio-done is omitted', async () => {
   const h = harness(), { c, s } = h;
@@ -487,19 +540,42 @@ test('ledger keeps finalized items as tombstones', () => {
   assert.equal(ledger.bind('b', next.context, next), next);
 });
 
-test('next task consumes one answer window, never two consecutive 12 second waits', async () => {
+test('an unanswered follow-up holds beyond twelve seconds and advances only after a real answer', async () => {
   const h = harness({ TASK_ADVANCE_DWELL_MS: 2600 });
   h.load('clearTaskAdvance', 'scheduleTaskAdvance', 'scheduleTaskPrompt', 'latestFollowupText');
-  h.s.dialogueHistory = [{speaker:'user', text:'Milk.', final:true}, {speaker:'luma', text:'Ready?'}];
-  h.s.stage = 'task-complete';
+  h.c.currentSceneConfig = () => ({ tasks: [h.task, { id: 'plate' }] });
+  h.s.dialogueHistory = [{ id: 1, speaker:'user', text:'Milk.', final:true },
+    { id: 2, speaker:'luma', text:'What do you like about it?' }];
+  Object.assign(h.s, { stage: 'task-complete', taskIndex: 0, messageSerial: 2,
+    activeQuestion: 'What do you like about it?' });
+  const ready = h.c.connectDuplexSession();
+  const send = event => h.s.duplexSocket.onmessage({ data: JSON.stringify(event) });
+  await send({ type: 'session.created' }); await ready;
   let askedAt = 0;
+  const startedTasks = [];
   h.c.speak = () => { askedAt = h.c.Date.now(); };
-  h.c.startTask = () => {
+  h.c.startTask = index => {
+    startedTasks.push(index);
     h.s.stage = 'active'; h.s.awaitingPrompt = true;
     h.c.scheduleTaskPrompt(h.task.id, 180);
   };
-  h.c.scheduleTaskAdvance(2); await h.advance(12300);
-  assert.ok(askedAt >= 22000 && askedAt <= 22300);
+  h.c.scheduleTaskAdvance(1);
+  await h.advance(60000);
+  assert.equal(askedAt, 0, 'elapsed time cannot answer the character question');
+  assert.deepEqual(startedTasks, []);
+  assert.equal(h.s.stage, 'task-complete');
+  await send({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'followup', transcript: 'It tastes good.' });
+  assert.ok(h.s.dialogueHistory.some(message => message.text === 'It tastes good.' && message.final));
+  assert.equal(h.effects.filter(effect => effect.type === 'feedback').length, 1);
+  await h.advance(3000);
+  assert.deepEqual(startedTasks, [], 'the answer still gets its real provider reply before advancing');
+  Object.assign(h.s, { duplexValidatedText: true, duplexPendingSubtitle: 'That makes sense.' });
+  await send({ type: 'response.done', response_id: 'followup-reply' });
+  const replyEndedAt = h.now();
+  await h.advance(3000);
+  assert.deepEqual(startedTasks, [1], 'the existing scheduler advances exactly once after the answer and reply');
+  assert.ok(askedAt >= replyEndedAt + 2600 && askedAt <= replyEndedAt + 3000,
+    'answering the follow-up must not add another twelve-second delay');
 });
 
 test('an already answered question does not add twelve seconds after a failed reply', async () => {

@@ -47,6 +47,13 @@ mkdirSync(output, { recursive: true });
         return { scene, topbar, buttons, status, slots, faceTop,
           title: document.getElementById('learningStageLabel').textContent,
           progressHidden: getComputedStyle(document.getElementById('sceneProgress')).display === 'none',
+          progress: {
+            completed: Number(document.getElementById('sceneProgress').getAttribute('aria-valuenow')),
+            total: Number(document.getElementById('sceneProgress').getAttribute('aria-valuemax')),
+            text: document.getElementById('sceneProgressCount').textContent,
+            fill: document.getElementById('stepFill').style.width,
+            expectedTotal: currentSceneConfig().tasks.length,
+          },
           missionHidden: getComputedStyle(document.getElementById('missionHud')).display === 'none',
           slotsVisible: slots.height > 0, keywords: document.querySelectorAll('#visualCues .visual-cue').length,
           noOverflow: document.documentElement.scrollWidth <= innerWidth + 1,
@@ -55,7 +62,12 @@ mkdirSync(output, { recursive: true });
       });
       checks.push({ label, sceneId, width, height, ...result });
       assert.equal(result.title, title);
-      assert.ok(result.progressHidden);
+      assert.equal(result.progressHidden, false);
+      const expectedCompleted = label.includes('complete') ? result.progress.expectedTotal : 0;
+      assert.equal(result.progress.total, result.progress.expectedTotal);
+      assert.equal(result.progress.completed, expectedCompleted);
+      assert.equal(result.progress.text, `${expectedCompleted} / ${result.progress.total}`);
+      assert.equal(result.progress.fill, label.includes('complete') ? '100%' : '0%');
       assert.equal(result.missionHidden, sceneId !== 'coffee');
       if (sceneId === 'coffee') assert.ok(result.slotsVisible && result.keywords > 0 && result.headroom,
         JSON.stringify(checks.at(-1)));

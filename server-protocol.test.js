@@ -11,24 +11,27 @@ const voiceDeclarations = ['ASR_COMMON_WORDS', 'ASR_SCENE_WORDS', 'DUPLEX_TASKS'
 const duplexAsr = source.match(/^function duplexAsr\([^]*?^\}$/m)[0];
 function proxy(start = {}) {
   const sockets = [], timers = [], instructionCalls = [];
+  const cancelledTimers = new Set();
+  let timerId = 0;
   class Socket extends EventEmitter {
     static OPEN = 1;
     constructor() { super(); this.readyState = 1; this.bufferedAmount = 0; this.sent = []; this.closed = 0; sockets.push(this); }
-    send(message) { this.sent.push(JSON.parse(message)); }
+    send(message) { this.sent.push(JSON.parse(message)); if (this.tracksBufferedWrites) this.bufferedAmount += Buffer.byteLength(message); }
     close() { this.closed++; }
     terminate() {} ping() {}
   }
   const context = vm.createContext({ Buffer, Breakfast: require('./breakfast'), Coffee: require('./coffee'), SceneMemory: require('./scene-memory'), WebSocket: Socket, crypto: {randomUUID:()=> 'test-id'},
     console:{log(){}},process:{env:{DOUBAO_API_KEY:'test-only'}},DUPLEX_URL:'wss://test.invalid',
     duplexInstructions:(...args)=> {instructionCalls.push(args);return 'test';},cleanText: text=>text,
-    setTimeout: fn=> {timers.push(fn);return 1;},setInterval:()=>1,clearInterval() {},
+    setTimeout: fn=> {const id = ++timerId; timers.push(() => { if (!cancelledTimers.has(id)) fn(); }); return id;},
+    clearTimeout: id=>cancelledTimers.add(id),setInterval:()=>1,clearInterval() {},
   });
   vm.runInContext(`${voiceDeclarations}\n${duplexAsr}\n${normalizeCoffeeState}\n${attach}`,context);
   const client = new Socket(); sockets.length = 0;
   context.attachDuplexProxy(client);
   client.emit('message', Buffer.from(JSON.stringify({type:'start',taskId:'milk',speechRate:'慢速',...start})), false);
   const upstream = sockets[0]; upstream.emit('open');
-  return {client,upstream,timers,instructionCalls};
+  return {client,upstream,timers,instructionCalls,runTimers:()=>timers.splice(0).forEach(fn=>fn())};
 }
 test('proxy forwards a reconnect burst in order without a one-frame timer backlog', () => {
   const {client,upstream} = proxy();
@@ -37,6 +40,50 @@ test('proxy forwards a reconnect burst in order without a one-frame timer backlo
   upstream.emit('message',Buffer.from('{"type":"session.created"}'));
   const output = Buffer.concat(upstream.sent.filter(e=>e.type==='input_audio_buffer.append').map(e=>Buffer.from(e.audio,'base64')));
   assert.deepEqual(output,input);
+});
+test('a full browser playback queue survives transient socket backpressure in order', () => {
+  const {client,upstream,timers,runTimers} = proxy();
+  upstream.emit('message',Buffer.from('{"type":"session.created"}'));
+  upstream.tracksBufferedWrites = true;
+  const input = Buffer.alloc(16000 * 2 * 60);
+  for (let i = 0; i < input.length; i++) input[i] = i % 251;
+  for (let offset = 0; offset < input.length; offset += 3200) {
+    client.emit('message',input.subarray(offset, offset + 3200),true);
+  }
+  const live = Buffer.from([7, 0, 8, 0]);
+  client.emit('message',live,true);
+  assert.equal(timers.length,1,'only one retry is needed while the socket is backed up');
+  assert.equal(client.sent.some(event=>event.type==='local.error'),false);
+  assert.equal(upstream.sent.some(event=>event.type==='session.close'),false);
+  let drains = 0;
+  while (timers.length && drains++ < 10) {
+    upstream.bufferedAmount = 0;
+    runTimers();
+  }
+  assert.equal(timers.length,0,'the queue also finishes when no more microphone frames arrive');
+  const output = Buffer.concat(upstream.sent.filter(e=>e.type==='input_audio_buffer.append').map(e=>Buffer.from(e.audio,'base64')));
+  assert.deepEqual(output,Buffer.concat([input,live]));
+});
+test('closing a backed-up session cancels its pending audio drain', () => {
+  const {client,upstream,runTimers} = proxy();
+  upstream.emit('message',Buffer.from('{"type":"session.created"}'));
+  upstream.bufferedAmount = 520000;
+  client.emit('message',Buffer.alloc(3200),true);
+  client.emit('close');
+  upstream.bufferedAmount = 0;
+  runTimers();
+  assert.equal(upstream.sent.some(event=>event.type==='input_audio_buffer.append'),false);
+  assert.equal(upstream.closed,1);
+});
+test('audio buffering remains bounded during a sustained upstream stall', () => {
+  const {client,upstream} = proxy();
+  upstream.emit('message',Buffer.from('{"type":"session.created"}'));
+  upstream.bufferedAmount = 520000;
+  client.emit('message',Buffer.alloc(16000 * 2 * 60),true);
+  assert.equal(client.sent.some(event=>event.type==='local.error'),false);
+  client.emit('message',Buffer.alloc(2),true);
+  assert.equal(client.sent.at(-1).message,'audio_buffer_full');
+  assert.equal(upstream.sent.at(-1).type,'session.close');
 });
 test('close fallback closes the captured upstream socket after clearing current state', () => {
   const {client,upstream,timers} = proxy();client.emit('close');timers.forEach(fn=>fn());

@@ -12,102 +12,56 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%237965df'/%3E%3Cpath d='M19 17h8v23h18v7H19z' fill='white'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/regular/style.css" />
     <link rel="stylesheet" href="./node_modules/@phosphor-icons/web/src/fill/style.css" />
-    <link rel="stylesheet" href="./styles.css?v=20260924-visit-goal" />
+    <link rel="stylesheet" href="./styles.css?v=regions-20260929" />
   </head>
   <body>
     <div class="app-frame" id="appFrame">
       <main class="app-shell" id="appShell">
-        <section class="view view-home is-active" data-view="home" aria-label="旅程">
-          <div class="view-scroll home-scroll adventure-scroll">
-            <section class="adventure-stage" aria-labelledby="todayTitle">
-              <img id="todayHero" src="./assets/optimized/coffee-home-720.jpg" alt="阳光下的街角咖啡店，Mia 正在窗口准备咖啡" decoding="async" />
-              <div class="adventure-stage-shade" aria-hidden="true"></div>
-              <header class="home-header adventure-topbar">
-                <span class="luma-wordmark" aria-label="Luma">Luma</span>
-                <button class="journey-switch" type="button" data-nav="world" aria-label="查看当前旅程：街角的第一杯">
-                  <span>当前旅程</span><strong id="adventureJourneyTitle">街角的第一杯</strong><i class="ph ph-caret-right" aria-hidden="true"></i>
-                </button>
-                <button class="profile-avatar" type="button" data-nav="profile" aria-label="打开设置">
-                  <img src="./assets/optimized/avatar-120.jpg" alt="" decoding="async" />
+        <section class="view view-world is-active" data-view="world" aria-label="世界">
+          <div class="view-scroll world-scroll">
+            <section class="life-world-map" aria-label="生活地图">
+              <div id="worldMapViewport" class="world-map-viewport" data-initial-scale="1.12" data-max-scale="1.6" tabindex="0" aria-label="生活地图，可拖动和缩放。键盘方向键移动，加减键缩放，0 恢复默认大小并定位当前任务。">
+                <div id="worldMapCanvas" class="world-map-canvas">
+                  <img class="world-map-art" src="./assets/adventure/world-life-map-v1.png" alt="连接咖啡店、家、机场和办公室的生活地图" draggable="false" fetchpriority="high" />
+                </div>
+                <div id="worldMapMarkers" class="world-map-markers"></div>
+              </div>
+              <header class="world-life-header">
+                <div class="world-activity">
+                  <p id="worldToday" class="world-activity-stat"><span>今天完成 </span><span class="world-activity-value"><strong id="worldTodayCount">0</strong> <small>件事</small></span></p>
+                  <p id="worldWeek" class="world-activity-stat"><span>本周体验 </span><span class="world-activity-value"><strong id="worldWeekCount">0</strong> <small>天</small></span></p>
+                </div>
+                <button class="world-life-level" data-nav="profile" type="button" aria-label="查看生活经验">
+                  <span><strong id="worldLevel">Lv.1</strong><i class="ph ph-caret-right" aria-hidden="true"></i></span>
+                  <progress id="worldXPMeter" value="0" max="100" aria-label="生活经验等级进度"></progress>
+                  <small id="worldXP">0 / 100 经验</small>
                 </button>
               </header>
-              <ol class="adventure-route" id="adventureRoute" aria-label="咖啡店旅程进度">
-                <li data-adventure-mission="C01"><span class="route-icon"><i class="ph-fill ph-check-circle" aria-hidden="true"></i></span><span><strong>第一次点单</strong><em>从这里开始</em></span></li>
-                <li data-adventure-mission="C02"><span class="route-icon"><i class="ph-fill ph-map-pin" aria-hidden="true"></i></span><span><strong>朋友的委托</strong><em>当前事件</em></span></li>
-                <li data-adventure-mission="C03"><span class="route-icon"><i class="ph-fill ph-warning-circle" aria-hidden="true"></i></span><span><strong>处理错单</strong><em>接下来</em></span></li>
-              </ol>
-              <svg class="adventure-route-line" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                <path class="route-track" d="M11 14 C22 14 53 23 66 39 C75 50 31 51 14 62 C5 68 25 91 50 100" />
-                <path class="route-progress segment-1" d="M11 14 C22 14 53 23 66 39" />
-                <path class="route-progress segment-2" d="M66 39 C75 50 31 51 14 62" />
-                <path class="route-progress segment-3" d="M14 62 C5 68 25 91 50 100" />
-              </svg>
-              <div class="current-landmark" aria-hidden="true"><i class="ph-fill ph-map-pin"></i><span id="adventureLandmarkLabel">日常 · 街角咖啡店</span></div>
-            </section>
-
-            <section class="adventure-mission-card daily-card" aria-labelledby="todayTitle">
-              <div class="mission-kicker"><span><i class="ph-fill ph-coffee" aria-hidden="true"></i><strong id="todayMissionCode">当前委托 · C01</strong></span><em class="live-label">准备开始</em><button id="chooseCoffeeMission" class="choose-mission-link" type="button" hidden>选择任务<i class="ph ph-caret-right" aria-hidden="true"></i></button></div>
-              <div class="today-context"><i class="ph-fill ph-map-pin" aria-hidden="true"></i><span id="todayContext">街角咖啡店 · 现在</span></div>
-              <h1 id="todayTitle">推开门，给自己点一杯</h1>
-              <p id="todaySubtitle">一杯喜欢的咖啡，堂食或带走。</p>
-              <button id="adventureCta" class="primary-cta" type="button" data-open-scene="coffee" disabled aria-busy="true">正在准备旅程…</button>
-              <h2 id="dailyTitle" hidden>街角的第一杯</h2>
+              <div class="world-region-toolbar" aria-label="探索区域">
+                <button id="chooseWorldRegion" type="button" aria-haspopup="dialog"><span id="worldRegionName">生活街区</span><i class="ph ph-caret-down" aria-hidden="true"></i></button>
+                <button id="allWorldPlaces" type="button" aria-haspopup="dialog"><i class="ph ph-list-bullets" aria-hidden="true"></i>全部地点</button>
+              </div>
+              <div class="map-controls" aria-label="地图控制">
+                <button id="mapRecenter" type="button" aria-label="恢复默认大小并定位当前任务"><i class="ph ph-crosshair" aria-hidden="true"></i></button>
+              </div>
+              <section class="world-continue" aria-labelledby="todayTitle">
+                <div class="world-continue-compact">
+                  <button id="worldContinueToggle" type="button" aria-controls="worldContinueDetails" aria-expanded="true" aria-label="展开当前事件"><span><small id="worldContinuePlace">生活街区 · 街角咖啡店</small><strong id="worldContinueTitle">推开门，给自己点一杯</strong></span><i class="ph ph-caret-up" aria-hidden="true"></i></button>
+                  <button id="worldContinueResume" type="button" aria-label="继续当前事件"><i class="ph ph-arrow-right" aria-hidden="true"></i></button>
+                </div>
+                <div id="worldContinueDetails">
+                <div class="world-continue-meta"><span id="todayContext">日常 · 街角咖啡店</span><button id="chooseCoffeeMission" type="button">选择任务<i class="ph ph-caret-right" aria-hidden="true"></i></button></div>
+                <h1 id="todayTitle">推开门，给自己点一杯</h1>
+                <p id="todaySubtitle">一杯喜欢的咖啡，堂食或带走。</p>
+                <button id="adventureCta" class="primary-cta" type="button" data-open-scene="coffee" disabled aria-busy="true">继续生活<i class="ph ph-arrow-right" aria-hidden="true"></i></button>
+                </div>
+              </section>
             </section>
           </div>
         </section>
 
-        <section class="view view-world" data-view="world" aria-label="世界">
-          <div class="view-scroll page-scroll world-scroll">
-            <section class="life-world-map" aria-labelledby="worldMapTitle">
-              <img class="world-map-art" data-src="./assets/optimized/world-map-860.jpg" alt="连接日常、工作、出行和未来城市生活的生活地图" decoding="async" />
-
-              <button class="world-node node-coffee is-current" type="button" data-world-node="coffee" data-world-scene="coffee" aria-label="查看街角的第一杯，已完成 0 / 4">
-                <span class="world-node-art"><img data-src="./assets/optimized/coffee-thumb-220.jpg" alt="" decoding="async" /></span>
-                <span class="world-node-copy"><small>当前地点</small><strong>街角的第一杯</strong></span>
-              </button>
-              <button class="world-node node-kitchen" type="button" data-world-node="kitchen" data-world-scene="kitchen" aria-label="预览早餐时间">
-                <span class="world-node-art"><img data-src="./assets/optimized/breakfast-thumb-220.jpg" alt="" decoding="async" /></span>
-                <span class="world-node-copy"><small>随时可练</small><strong>早餐时间</strong></span>
-              </button>
-              <button class="world-node node-airport" type="button" data-world-node="airport" data-world-scene="airport" aria-label="预览机场登机口">
-                <span class="world-node-art"><img data-src="./assets/optimized/airport-thumb-220.jpg" alt="" decoding="async" /></span>
-                <span class="world-node-copy"><small>出行场景</small><strong>机场登机口</strong></span>
-              </button>
-              <button class="world-node node-office" type="button" data-world-node="office" data-world-scene="office" aria-label="预览第一次见同事">
-                <span class="world-node-art"><img data-src="./assets/optimized/office-thumb-220.jpg" alt="" decoding="async" /></span>
-                <span class="world-node-copy"><small>工作场景</small><strong>第一次见同事</strong></span>
-              </button>
-              <button class="world-node node-future" type="button" data-world-node="future" data-world-scene="street" aria-label="预览未来分支：城市生活">
-                <span class="world-node-art"><img data-src="./assets/optimized/street-thumb-220.jpg" alt="" decoding="async" /></span>
-                <span class="world-node-copy"><small>未来分支</small><strong>城市生活</strong></span>
-              </button>
-
-              <button class="world-journey-card" id="worldJourneyCard" type="button" data-world-scene="coffee" data-world-mission="C01" aria-label="查看当前旅程详情">
-                <span class="world-journey-heading">
-                  <span class="world-map-mark" aria-hidden="true"><i class="ph-fill ph-map-pin"></i></span>
-                  <span class="world-map-heading"><small id="worldMapStateLabel">当前旅程</small><strong id="worldMapTitle">街角咖啡店</strong></span>
-                </span>
-                <span class="world-journey-detail">
-                  <span class="world-journey-count" id="worldJourneyProgress">0/4</span>
-                  <span class="world-journey-copy">
-                    <small><span id="worldJourneyMissionCode">C01</span><em id="worldJourneyMissionStatus">当前事件 · 可以开始</em></small>
-                    <strong id="worldJourneyMissionTitle">第一次自己点咖啡</strong>
-                    <span class="world-journey-meter" aria-hidden="true"><i id="worldJourneyProgressBar"></i></span>
-                  </span>
-                  <i class="ph ph-caret-right" aria-hidden="true"></i>
-                </span>
-              </button>
-            </section>
-          </div>
-        </section>
-
-        <section class="view view-growth" data-view="growth" aria-label="学习笔记">
+        <section class="view view-growth" data-view="growth" aria-label="学习">
           <div class="view-scroll page-scroll footprints-scroll learning-notes-scroll">
-            <header class="page-header learning-notes-header">
-              <span class="notes-eyebrow">MY ENGLISH LIFE</span>
-              <h1 id="learningNotesTitle">学习笔记</h1>
-              <p>把生活里用过的英语，慢慢变成自己的。</p>
-            </header>
 
             <section class="review-overview" aria-labelledby="reviewOverviewTitle">
               <div class="notes-review-topline"><span id="notesReviewEyebrow">从一件小事开始</span><span id="notesReviewCount" hidden></span></div>
@@ -116,19 +70,51 @@
                 <img id="notesReviewImage" src="./assets/optimized/coffee-home-720.jpg" alt="" aria-hidden="true">
               </div>
               <p id="reviewOverviewCopy">和 Mia 打声招呼，试着点一杯咖啡。</p>
-              <button class="notes-primary-action" id="startReview" type="button"><span data-learning-label>开始第一段练习</span><i class="ph ph-arrow-right" aria-hidden="true"></i></button>
-              <div class="review-queue-list" id="reviewQueueList" aria-live="polite"></div>
+              <button class="notes-primary-action" id="startReview" type="button"><span data-learning-label>开始第一段练习</span></button>
             </section>
 
-            <section class="world-evidence notes-section" id="worldEvidenceSection" aria-labelledby="worldEvidenceTitle" hidden>
-              <div class="section-title notes-section-title"><h2 id="worldEvidenceTitle">一个小进步</h2><i class="ph ph-sparkle" aria-hidden="true"></i></div>
-              <div id="worldEvidenceList"></div>
-            </section>
 
-            <details class="notes-fold practice-again-section" id="notesPracticeFold" hidden>
-              <summary><span class="notes-fold-icon"><i class="ph ph-plant" aria-hidden="true"></i></span><span><strong id="practiceAgainTitle">想再练练</strong><small>需要时，回到熟悉的场景</small></span><em id="strengthCount">0 项</em><i class="ph ph-caret-down" aria-hidden="true"></i></summary>
-              <div class="strength-list" id="strengthList" aria-live="polite"></div>
-            </details>
+            <section class="study-section" aria-labelledby="expressionTitle">
+              <div class="study-section-heading"><h2 id="expressionTitle">表达优化</h2></div>
+              <div id="expressionList" class="expression-list"><div class="study-empty"><i class="ph ph-chat-circle-dots" aria-hidden="true"></i><p>说过的话，会成为下一次的小练习。</p><button type="button" data-nav="world">去世界里聊聊<i class="ph ph-arrow-right" aria-hidden="true"></i></button></div></div>
+            </section>
+            <section class="study-section" aria-labelledby="dictionaryTitle">
+              <div class="study-section-heading"><h2 id="dictionaryTitle">情景词典</h2></div>
+              <div id="sceneDictionary" class="dictionary-grid"></div>
+            </section>
+            <div class="legacy-learning" hidden aria-hidden="true">
+              <div id="abilityOrbit"><span id="abilityPercent"></span></div><h2 id="abilityTitle"></h2><p id="abilityDescription"></p>
+              <span id="growthHeard"></span><span id="growthActions"></span><span id="growthSpoken"></span><span id="growthTransfer"></span>
+              <i id="growthHeardMeter"></i><i id="growthActionsMeter"></i><i id="growthSpokenMeter"></i><i id="growthTransferMeter"></i><div class="phrase-cloud"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view view-profile" data-view="profile" aria-label="我的">
+          <div class="view-scroll page-scroll settings-scroll personal-scroll">
+            <header class="personal-topbar"><button type="button" id="openPreferences" aria-label="打开练习设置"><i class="ph ph-gear-six" aria-hidden="true"></i></button></header>
+            <section class="personal-identity">
+              <button id="editAvatar" class="personal-avatar-button" type="button" aria-label="更换头像"><img id="profileAvatar" src="./assets/optimized/avatar-120.jpg" alt="我的头像" /><i class="ph ph-camera" aria-hidden="true"></i></button>
+              <h2 id="profileName">生活探索者</h2><p id="profileSince">在这里，把英语用起来。</p>
+              <button id="editProfile" class="profile-edit-link" type="button">编辑个人资料<i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
+              <input id="profileAvatarFile" type="file" accept="image/jpeg,image/png,image/webp" hidden />
+            </section>
+            <section class="personal-experience" aria-labelledby="personalXPTitle">
+              <div><span class="personal-xp-label"><span id="personalXPTitle">生活经验</span><button id="xpRules" type="button" aria-label="了解生活经验规则"><i class="ph ph-info" aria-hidden="true"></i></button></span><strong id="personalLevel">Lv.1</strong></div>
+              <p><strong id="personalXP">0</strong><span>累计经验</span></p>
+              <progress id="personalXPMeter" value="0" max="100" aria-label="生活经验等级进度"></progress>
+            </section>
+            <section class="personal-data" aria-labelledby="personalDataTitle">
+              <div class="study-section-heading"><h2 id="personalDataTitle">我的学习数据</h2></div>
+              <div class="personal-stats"><div><i class="ph-fill ph-chat-circle-dots" aria-hidden="true"></i><span>英语回应</span><strong id="personalEnglish">0</strong></div><div><i class="ph-fill ph-flag" aria-hidden="true"></i><span>完成事件</span><strong id="personalCompleted">0</strong></div></div>
+              <div class="personal-expression-stats"><p><i class="ph-fill ph-cards" aria-hidden="true"></i>表达与积累</p><div><span><strong id="personalTargets">0</strong>用过的表达</span><span><strong id="personalIndependent">0</strong>无提示回应</span><span><strong id="personalDays">0</strong>体验天数</span></div></div>
+              <div class="personal-week-card" aria-labelledby="personalWeekTitle">
+                <h3 id="personalWeekTitle" class="personal-week-head"><i class="ph-fill ph-calendar-blank" aria-hidden="true"></i>本周足迹</h3>
+                <div id="personalWeek" class="personal-week"></div>
+              </div>
+            </section>
+            <section class="personal-achievements" aria-labelledby="personalAchievementTitle"><div class="study-section-heading"><h2 id="personalAchievementTitle">生活成就</h2></div><div id="personalBadges" class="personal-badges"></div></section>
+
 
             <details class="notes-fold learning-history-section" id="notesHistoryFold">
               <summary><span class="notes-fold-icon"><i class="ph ph-notebook" aria-hidden="true"></i></span><span><strong id="recentLearningTitle">练习足迹</strong><small id="notesHistorySummary">每一次开口，都留在这里</small></span><i class="ph ph-caret-down" aria-hidden="true"></i></summary>
@@ -145,36 +131,30 @@
               </div>
             </details>
 
-            <div class="legacy-learning" hidden aria-hidden="true">
-              <div id="abilityOrbit"><span id="abilityPercent"></span></div><h2 id="abilityTitle"></h2><p id="abilityDescription"></p>
-              <span id="growthHeard"></span><span id="growthActions"></span><span id="growthSpoken"></span><span id="growthTransfer"></span>
-              <i id="growthHeardMeter"></i><i id="growthActionsMeter"></i><i id="growthSpokenMeter"></i><i id="growthTransferMeter"></i><div class="phrase-cloud"></div>
-            </div>
-          </div>
-        </section>
 
-        <section class="view view-profile" data-view="profile" aria-label="设置">
-          <div class="view-scroll page-scroll settings-scroll">
-            <header class="settings-topbar"><button class="settings-back" type="button" data-profile-back aria-label="返回"><i class="ph ph-arrow-left" aria-hidden="true"></i></button><span>设置</span><span aria-hidden="true"></span></header>
-            <header class="profile-header"><div class="large-avatar"><i class="ph ph-user" aria-hidden="true"></i></div><h1>按自己的节奏</h1><p>从熟悉的生活开始，把英语一点点用起来。</p></header>
-            <section class="profile-learning-note"><i class="ph ph-notebook" aria-hidden="true"></i><div><h2>学习笔记</h2><p id="profileLearningCopy">复习需要再练的表达，查看真实学习成果。</p></div><button type="button" data-nav="growth" aria-label="查看学习笔记"><i class="ph ph-caret-right" aria-hidden="true"></i></button></section>
-            <section class="profile-stats legacy-learning" hidden aria-hidden="true"><strong id="profileHeard"></strong><strong id="profileActions"></strong><strong id="profileSpoken"></strong></section>
-            <h2 class="settings-heading">练习偏好</h2>
+            <details id="personalPreferences" class="personal-preferences"><summary><i class="ph ph-sliders-horizontal" aria-hidden="true"></i><strong>练习设置</strong><i class="ph ph-caret-down" aria-hidden="true"></i></summary>
             <div class="settings-list">
               <button type="button" data-setting="speech-rate"><span><i class="ph ph-speaker-high" aria-hidden="true"></i><strong>语音与语速</strong></span><em id="speechRateValue">慢速</em><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></button>
               <button type="button" data-setting="rescue"><span><i class="ph ph-translate" aria-hidden="true"></i><strong>中文帮助</strong></span><em id="rescueValue">按需显示</em><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></button>
               <button type="button" data-setting="reminder"><span><i class="ph ph-bell" aria-hidden="true"></i><strong>每日提醒</strong></span><em>网页暂不可用</em><i class="ph ph-info" aria-hidden="true"></i></button>
               <div class="settings-static"><span><i class="ph ph-shield-check" aria-hidden="true"></i><strong>语音识别</strong></span><em>使用云端识别</em></div>
             </div>
-            <p class="settings-footnote">查看世界、学习笔记和设置不会启用麦克风。开始具体事件时，应用才会向你请求权限。</p>
+
+            </details>
+            <p class="personal-storage-note">资料与进度保存在当前浏览器</p>
           </div>
         </section>
 
         <nav class="bottom-nav" id="bottomNav" aria-label="主要导航">
-          <button class="is-active" type="button" data-nav="home"><i class="ph-fill ph-flag" aria-hidden="true"></i><span>旅程</span></button>
-          <button type="button" data-nav="world"><i class="ph-fill ph-globe-hemisphere-west" aria-hidden="true"></i><span>世界</span></button>
-          <button type="button" data-nav="growth"><i class="ph-fill ph-notebook" aria-hidden="true"></i><span>笔记</span></button>
+          <button class="is-active" type="button" data-nav="world" aria-current="page"><i class="ph-fill ph-globe-hemisphere-west" aria-hidden="true"></i><span>世界</span></button>
+          <button type="button" data-nav="growth"><i class="ph-fill ph-book-open" aria-hidden="true"></i><span>学习</span></button>
+          <button type="button" data-nav="profile"><i class="ph-fill ph-user-circle" aria-hidden="true"></i><span>我的</span></button>
         </nav>
+        <dialog id="worldPlacesDialog" class="world-places-dialog" aria-labelledby="worldPlacesTitle">
+          <header class="world-places-head"><h2 id="worldPlacesTitle">全部地点</h2><button id="closeWorldPlaces" type="button" aria-label="关闭地点列表"><i class="ph ph-x" aria-hidden="true"></i></button></header>
+          <div id="worldPlacesContent" class="world-places-content"></div>
+        </dialog>
+        <dialog id="studyDialog" class="study-dialog" aria-labelledby="studyDialogTitle"><div class="study-dialog-head"><h2 id="studyDialogTitle"></h2><button type="button" id="closeStudyDialog" aria-label="关闭"><i class="ph ph-x" aria-hidden="true"></i></button></div><div id="studyDialogContent" class="study-dialog-content"></div></dialog>
 
         <div class="app-toast" id="appToast" role="status" aria-live="polite"></div>
 
@@ -183,10 +163,13 @@
           <div class="sheet-panel">
             <div class="sheet-visual"><img id="sheetImage" alt="情境预览" decoding="async" /><button class="sheet-close" type="button" data-close-sheet aria-label="关闭"><i class="ph ph-x"></i></button><span class="sheet-badge" id="sheetBadge">可进入</span></div>
             <div class="sheet-content">
+              <div class="sheet-scroll">
               <div class="sheet-copy">
                 <span class="overline" id="sheetEyebrow">HOME · MORNING</span><h2 id="sheetTitle">帮 Luma 准备早餐</h2><p id="sheetDescription">先听懂她的需要，再用自己的话回应；画面会跟着表达变化。</p>
                 <div class="sheet-people" id="sheetPeople"><span><i class="ph ph-user"></i> Luma</span><span><i class="ph ph-clock"></i> 3 分钟</span><span><i class="ph ph-sparkle"></i> 零基础</span></div>
                 <div class="sheet-goal"><i class="ph ph-target"></i><div><small>你将自然遇到</small><strong id="sheetGoal">give me · apple · thank you</strong></div></div>
+              </div>
+              <details id="sheetEvents" class="sheet-events" hidden><summary>这里可以做什么<i class="ph ph-caret-down" aria-hidden="true"></i></summary><div id="sheetEventList" class="sheet-event-list"></div></details>
               </div>
               <button class="sheet-cta" id="sheetCta" type="button">进入真实情境 <i class="ph ph-arrow-right"></i></button>
             </div>
@@ -199,14 +182,21 @@
             <div class="object-layer"><div class="task-focus" id="taskFocus" aria-hidden="true"><span></span></div><div class="drop-zone" id="dropZone" aria-hidden="true"><span></span></div><button class="apple-object" id="apple" type="button" aria-label="红苹果。拖动并交给 Luma。"><span class="apple-aura"></span><img data-src="./assets/apple.png" alt="红苹果" draggable="false" /><span class="apple-shadow"></span></button><button class="scene-hotspot" type="button" data-object="milk" aria-label="牛奶"><span></span></button><button class="scene-hotspot" type="button" data-object="plate" aria-label="盘子"><span></span></button><button class="scene-hotspot" type="button" data-object="cup" aria-label="杯子"><span></span></button><button class="scene-hotspot" type="button" data-object="spoon" aria-label="勺子"><span></span></button></div>
             <div class="foreground" aria-hidden="true"></div>
             <div id="visualCues" class="visual-cues" aria-hidden="true" hidden></div>
-            <section id="visualStory" class="visual-story" aria-label="这杯咖啡" hidden>
+            <section id="sceneTaskHud" class="scene-task-hud" aria-label="当前任务" hidden>
               <div class="mission-hud" id="missionHud" hidden>
-                <span id="missionHudCode">任务</span><strong id="missionHudTitle">给自己点一杯喜欢的咖啡</strong><em id="missionHudProgress">1 / 4</em>
+                <span id="missionHudCode">任务</span><strong id="missionHudTitle">给自己点一杯喜欢的咖啡</strong><em id="missionHudProgress">1 / 4</em><button id="taskHelpToggle" type="button" aria-label="查看当前话题提示" aria-controls="learningHelpPanel" aria-expanded="false"><i class="ph ph-lightbulb" aria-hidden="true"></i></button>
               </div>
-              <p data-visual-caption></p><strong data-visual-order></strong>
               <div class="order-slots" id="orderSlots" hidden aria-label="你的点单">
                 <span data-order-slot="drink">饮品</span><span data-order-slot="size">杯型</span><span data-order-slot="service">方式</span>
               </div>
+              <div class="order-slots task-segments" id="taskSegments" role="list" tabindex="0" aria-label="本轮话题进度，可左右滑动" hidden></div>
+              <section class="learning-help-inline" id="learningHelpPanel" role="region" aria-labelledby="learningHelpTitle" hidden>
+                <header><h2 id="learningHelpTitle">开口提示</h2><button type="button" data-learning-help="close" aria-label="收起提示"><i class="ph ph-caret-up" aria-hidden="true"></i></button></header>
+                <div class="learning-help-scroll"><div class="learning-help-content" id="learningHelpContent" aria-live="polite"></div>
+                <div class="interview-help-actions" id="interviewHelpActions" hidden><button type="button" id="skipInterviewTopic">换个话题</button><button type="button" id="endInterviewPractice">结束本次练习</button></div>
+                </div>
+                <div class="learning-help-options" aria-label="选择提示内容"><button type="button" data-learning-help="keyword">开口提示</button><button type="button" data-learning-help="meaning">中文意思</button><button type="button" data-learning-help="example">示例</button><button type="button" data-learning-help="replay" aria-label="再听一遍问题"><i class="ph ph-speaker-high" aria-hidden="true"></i></button></div>
+              </section>
             </section>
             <span class="visual-image-status" role="status">这一幕暂未加载，仍可继续对话。</span>
             <div class="breakfast-world" id="breakfastWorld" hidden>
@@ -222,6 +212,7 @@
             <section class="scene-intro" id="sceneIntro" role="dialog" aria-modal="true" aria-labelledby="introTitle" aria-describedby="introCopy" hidden>
               <button id="introBack" class="intro-back" type="button" aria-label="先返回"><i class="ph ph-arrow-left" aria-hidden="true"></i></button>
               <div class="intro-content">
+                <button class="intro-close" id="introClose" type="button" aria-label="返回世界"><i class="ph ph-x" aria-hidden="true"></i></button>
                 <header class="intro-heading">
                   <span class="intro-greeting">不用会很多英语，先试着聊聊。</span>
                   <h1 id="introTitle"><span>帮 <em>Luma</em></span><span>准备早餐</span></h1>
@@ -236,6 +227,10 @@
                   </div>
                   <p id="coffeeMissionBrief">这一关会给你足够帮助。说一个词也能继续，最后再试着连起来。</p>
                 </section>
+                <section class="interview-brief" id="interviewBrief" aria-label="本次面试练习" hidden>
+                  <p id="interviewDuration"></p><ol id="interviewTopics"></ol>
+                  <p class="interview-brief-note">用你的真实经历回答，没有标准答案。需要思考、澄清或换个话题，都可以直接说。</p>
+                </section>
                 <div class="intro-guidance">
                   <div class="intro-guidance-row"><i class="ph ph-chat-circle" aria-hidden="true"></i><p id="introCopy">听不懂，随时开口问<span id="introPerson">Luma</span>。<br />直接说<strong>「什么意思？」</strong>也可以。</p></div>
                   <div class="intro-guidance-row intro-guidance-secondary"><i class="ph ph-microphone" aria-hidden="true"></i><p class="intro-example">一个词、短句，都可以。<br />她说话时你也能开口，不用等提示音。</p></div>
@@ -247,21 +242,13 @@
                 </div>
               </div>
             </section>
-            <header class="experience-topbar"><button type="button" id="exitScene" aria-label="退出情境"><i class="ph ph-arrow-left"></i></button><div class="scene-top-status"><span id="learningStageLabel" class="learning-stage-label">生活里的英语对话</span><div class="scene-step" id="sceneProgress" role="progressbar" aria-label="场景学习进度" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"><span id="stepFill"></span></div></div><div class="mode-pill" id="modePill"><span class="mode-dot"></span><span id="modeLabel">准备开始</span></div><button class="subtitle-toggle" type="button" id="subtitleToggle" aria-label="隐藏字幕" aria-pressed="true" title="隐藏字幕"><i class="ph ph-closed-captioning"></i></button><button type="button" id="resetButton" aria-label="重新开始"><i class="ph ph-arrow-counter-clockwise"></i></button><button type="button" id="finishConversation" hidden>结束对话</button></header>
+            <header class="experience-topbar"><button type="button" id="exitScene" aria-label="退出情境"><i class="ph ph-arrow-left"></i></button><div class="scene-top-status"><span id="learningStageLabel" class="learning-stage-label">生活里的英语对话</span><div class="scene-progress-row"><div class="scene-step" id="sceneProgress" role="progressbar" aria-label="本次任务进度" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"><span id="stepFill"></span></div><span class="scene-progress-count" id="sceneProgressCount" aria-hidden="true">0 / 5</span></div></div><div class="mode-pill" id="modePill"><span class="mode-dot"></span><span id="modeLabel">准备开始</span></div><button class="subtitle-toggle" type="button" id="subtitleToggle" aria-label="隐藏字幕" aria-pressed="true" title="隐藏字幕"><i class="ph ph-closed-captioning"></i></button><button type="button" id="resetButton" aria-label="重新开始"><i class="ph ph-arrow-counter-clockwise"></i></button><button type="button" id="finishConversation" hidden>结束对话</button></header>
             <div class="action-coach" id="actionCoach" role="status" hidden><i class="ph ph-hand-grabbing" aria-hidden="true"></i><span id="actionCoachText"></span></div>
             <section class="language-panel" id="languagePanel" aria-live="polite" hidden><div class="recent-dialogue" id="recentDialogue"></div></section>
             <button class="dialogue-history-button" id="openDialogueHistory" type="button" aria-controls="dialogueHistory" aria-expanded="false" hidden>全部对话 <i class="ph ph-caret-up" aria-hidden="true"></i></button>
-            <aside class="dialogue-history" id="dialogueHistory" aria-label="全部对话" aria-hidden="true"><button class="dialogue-history-backdrop" id="closeDialogueHistoryBackdrop" type="button" aria-label="关闭全部对话"></button><div class="dialogue-history-panel"><header><div><small>场景对话</small><h2>全部对话</h2></div><button id="closeDialogueHistory" type="button" aria-label="关闭全部对话"><i class="ph ph-x"></i></button></header><div class="dialogue-history-list" id="dialogueHistoryList"></div></div></aside>
-            <nav class="scene-controls" aria-label="情境控制"><button class="round-control" id="replayButton" type="button" aria-label="重新听一遍"><i class="ph ph-speaker-high"></i><span>重听</span></button><button class="mic-control" id="micButton" type="button" aria-label="打开麦克风" aria-pressed="false"><span class="mic-ripple"></span><i class="ph ph-microphone"></i><span id="micLabel">自动聆听</span></button><button class="round-control" id="helpButton" type="button" aria-label="获得提示"><i class="ph ph-lightbulb"></i><span>提示</span></button></nav>
+            <aside class="dialogue-history" id="dialogueHistory" aria-label="全部对话" aria-hidden="true"><button class="dialogue-history-backdrop" id="closeDialogueHistoryBackdrop" type="button" aria-label="关闭全部对话"></button><div class="dialogue-history-panel"><header><div><h2>全部对话</h2></div><button id="closeDialogueHistory" type="button" aria-label="关闭全部对话"><i class="ph ph-x"></i></button></header><div class="dialogue-history-list" id="dialogueHistoryList"></div></div></aside>
+            <nav class="scene-controls" aria-label="情境控制"><button class="round-control" id="replayButton" type="button" aria-label="重新听一遍"><i class="ph ph-speaker-high"></i><span>重听</span></button><button class="mic-control" id="micButton" type="button" aria-label="打开麦克风" aria-pressed="false"><span class="mic-ripple"></span><i class="ph ph-microphone"></i><span id="micLabel">自动聆听</span></button><button class="round-control" id="helpButton" type="button" aria-label="获得提示" aria-controls="learningHelpPanel" aria-expanded="false"><i class="ph ph-lightbulb"></i><span>提示</span></button></nav>
             <div class="voice-status" id="voiceStatus" role="status" aria-live="polite">正在连接语音…</div>
-            <section class="learning-help-panel" id="learningHelpPanel" role="dialog" aria-modal="true" aria-labelledby="learningHelpTitle" hidden>
-              <button class="learning-help-backdrop" type="button" data-learning-help="close" tabindex="-1" aria-label="关闭帮助"></button>
-              <div class="learning-help-sheet">
-                <header><div><span>一点帮助，继续开口</span><h2 id="learningHelpTitle">你想怎么试试？</h2></div><button type="button" data-learning-help="close" aria-label="关闭帮助"><i class="ph ph-x" aria-hidden="true"></i></button></header>
-                <div class="learning-help-options"><button type="button" data-learning-help="replay"><i class="ph ph-speaker-high" aria-hidden="true"></i>再听一遍</button><button type="button" data-learning-help="keyword"><i class="ph ph-key" aria-hidden="true"></i>给个关键词</button><button type="button" data-learning-help="meaning"><i class="ph ph-translate" aria-hidden="true"></i>什么意思</button><button type="button" data-learning-help="example"><i class="ph ph-chat-circle" aria-hidden="true"></i>给我个例子</button></div>
-                <div class="learning-help-content" id="learningHelpContent" aria-live="polite"></div>
-              </div>
-            </section>
             <div class="toast" id="toast" role="status" aria-live="polite"></div>
           </div>
         </section>
@@ -269,8 +256,8 @@
         <section class="review-screen" id="reviewScreen" aria-label="情境回顾" aria-hidden="true">
           <div class="completion-celebration" id="completionCelebration" aria-hidden="true"></div>
           <div class="review-scroll">
-            <header class="review-hero"><button type="button" id="closeReview" aria-label="关闭回顾"><i class="ph ph-x"></i></button><span class="review-check"><i class="ph-fill ph-check-circle"></i></span><span class="overline">生活又向前了一点</span><h1>这件小事，<em>办成了。</em></h1><p id="reviewSceneMeta">回顾这次练习的真实记录</p></header>
-            <div class="review-body">
+            <header class="review-hero"><button type="button" id="closeReview" aria-label="关闭回顾"><i class="ph ph-x"></i></button><span class="review-check"><i class="ph-fill ph-check-circle"></i></span><span class="overline" id="reviewEyebrow">生活又向前了一点</span><h1 id="reviewTitle">这件小事，<em>办成了。</em></h1></header>
+            <div class="review-body"><div id="lifeReward" class="life-reward" role="status" hidden></div>
               <section class="review-summary"><article><i class="ph ph-ear"></i><strong>完成回应</strong><span id="reviewHeard"></span></article><article><i class="ph ph-chat-circle"></i><strong>自主表达</strong><span id="reviewActions"></span></article><article><i class="ph ph-waveform"></i><strong>英语开口</strong><span id="reviewSpoken"></span></article></section>
               <section class="mission-result" id="missionResult" hidden>
                 <div class="mission-result-mark"><i class="ph ph-coffee" aria-hidden="true"></i></div>
@@ -294,13 +281,21 @@
     <script src="./coffee.js?v=20260924-order-changes" defer></script>
     <script src="./scene-visuals.js?v=20260924-keep-cup" defer></script>
     <script src="./dialogue-rules.js?v=20260923-free-scenes" defer></script>
+    <script src="./interview.js?v=interview-20260929" defer></script>
     <script src="./scene-dialogue.js?v=20260924-shared-dialogue" defer></script>
     <script src="./voice-runtime.js?v=1" defer></script>
     <script src="./scene-memory.js?v=20260924-life-visits" defer></script>
-    <script src="./learning-evidence.js?v=20260924-life-visits" defer></script>
+    <script src="./learning-evidence.js?v=20260929" defer></script>
     <script src="./world-learning-loop.js?v=20260924-life-visits" defer></script>
-    <script src="./learning-experience.js?v=20260924-life-visits" defer></script>
-    <script src="./app.js?v=20260924-shared-dialogue" defer></script>
-    <script src="./breakfast-ui.js?v=20260923-free-scenes" defer></script>
+    <script src="./life-experience.js?v=20260929" defer></script>
+    <script src="./learning-experience.js?v=20260929" defer></script>
+    <script src="./word-pronunciation.js?v=20260930" defer></script>
+    <script src="./word-lookup.js?v=20260930" defer></script>
+    <script src="./world-catalog.js?v=regions-20260929" defer></script>
+    <script src="./world-regions.js?v=regions-20260929" defer></script>
+    <script src="./navigation-ui.js?v=regions-20260929" defer></script>
+    <script src="./world-map.js?v=regions-20260929" defer></script>
+    <script src="./app.js?v=regions-20260929" defer></script>
+    <script src="./breakfast-ui.js?v=20260928-ui" defer></script>
   </body>
 </html>

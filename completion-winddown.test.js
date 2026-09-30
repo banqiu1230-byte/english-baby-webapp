@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { harness } = require('./test-support/voice-harness.cjs');
+const Coffee = require('./coffee');
 
 // Replay the actual completion scheduler with a controlled clock. This checks
 // turn ownership and the visible review outcome; it does not use a microphone.
@@ -132,4 +133,61 @@ test('continuous back-and-forth is not interrupted even though the task is compl
   }
   await h.advance(5300);
   assert.equal(reviews(h), 1);
+});
+
+function receiptHarness(scope = 'life-event') {
+  let h, saves = 0, visits = 0;
+  const progress = { completed: [], completedSessions: [], runs: 0 };
+  h = harness({
+    LumaExperience: { complete() {
+      saves += 1;
+      return { id: 'current-session', sceneId: h.s.selectedScene, missionId: h.s.coffeeMissionId,
+        scope, completedAt: new Date(h.now()).toISOString() };
+    } },
+    COFFEE_MISSION_UI: { C01: {}, C02: {}, C03: {}, C04: {} }, coffeeMissionProgress: progress,
+    saveCoffeeMissionProgress() {}, syncCoffeeMissionBoard() {},
+    rememberCompletedVisit() { visits += 1; }, syncLearningUi() {},
+  });
+  h.load('saveLearningSession', 'markCoffeeMissionCompleted', 'showReview');
+  Object.assign(h.s, { selectedScene: 'coffee', coffeeMissionId: 'C03', sessionScope: scope,
+    reviewTaskId: scope === 'target-practice' ? 'coffee-thanks' : null,
+    stage: 'complete', sessionSaved: false, coveredGoals: new Set(['coffee-thanks']) });
+  return { h, progress, saved: () => saves, visits: () => visits };
+}
+
+test('a valid alternate coffee outcome commits one receipt, mission completion, and visit', () => {
+  const f = receiptHarness();
+  let world = Coffee.advanceMission(Coffee.missionInitial('C03'), 'Large is fine.').world;
+  world = Coffee.advanceMission(world, 'Thank you.').world;
+  assert.equal(Coffee.missionComplete(world), true);
+  f.h.s.coffee = world;
+  const receipt = f.h.c.saveLearningSession();
+  assert.equal(receipt.scope, 'life-event');
+  f.h.c.saveLearningSession();
+  f.h.c.markCoffeeMissionCompleted(receipt);
+  assert.equal(f.saved(), 1);
+  assert.equal(f.visits(), 1);
+  assert.equal(f.progress.runs, 1);
+  assert.deepEqual(f.progress.completed, ['C03']);
+});
+
+test('a completed short expression commits learning only, without a coffee mission or visit', () => {
+  const f = receiptHarness('target-practice');
+  f.h.s.coffee = Coffee.missionInitial('C03');
+  assert.equal(f.h.c.saveLearningSession().scope, 'target-practice');
+  assert.equal(f.saved(), 1);
+  assert.equal(f.visits(), 0);
+  assert.equal(f.progress.runs, 0);
+  assert.deepEqual(f.progress.completed, []);
+});
+
+test('showing results cannot manufacture a receipt for unfinished world state', () => {
+  const f = receiptHarness();
+  f.h.s.coffee = Coffee.missionInitial('C03');
+  assert.equal(f.h.c.saveLearningSession(), null);
+  f.h.c.showReview();
+  f.h.s.stage = 'active';
+  f.h.c.showReview();
+  assert.equal(f.saved(), 0);
+  assert.equal(f.progress.runs, 0);
 });

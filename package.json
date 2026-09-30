@@ -6,12 +6,17 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check scene-dialogue.js && node --check dialogue-rules.js && node --check voice-runtime.js && node --check microphone-worklet.js && node --check breakfast.js && node --check coffee.js && node --check scene-visuals.js && node --check breakfast-ui.js && node --check scene-memory.js && node --check learning-evidence.js && node --check world-learning-loop.js && node --check learning-experience.js && node --check app.js && node --check server.js",
+    "check": "node --check scene-dialogue.js && node --check dialogue-rules.js && node --check voice-runtime.js && node --check microphone-worklet.js && node --check breakfast.js && node --check coffee.js && node --check scene-visuals.js && node --check breakfast-ui.js && node --check scene-memory.js && node --check learning-evidence.js && node --check world-learning-loop.js && node --check learning-experience.js && node --check app.js && node --check server.js && node --check life-experience.js && node --check navigation-ui.js && node --check world-map.js && node --check expression-review.js && node --check world-catalog.js && node --check world-regions.js && node --check interview.js && node --check conversation-help.js && node --check word-meaning.js && node --check word-lookup.js && node --check word-pronunciation.js",
     "test": "node --test *.test.js",
     "test:browser": "node test-support/breakfast-browser.cjs && node test-support/intro-browser.cjs",
     "test:world-browser": "node test-support/world-loop-browser.cjs",
     "test:notes-browser": "node test-support/notes-browser.cjs",
-    "test:conversation-browser": "node test-support/conversation-ui-browser.cjs"
+    "test:conversation-browser": "node test-support/conversation-ui-browser.cjs && node test-support/dialogue-layout-browser.cjs",
+    "test:navigation-browser": "node test-support/navigation-browser.cjs && node test-support/world-map-browser.cjs --app && node test-support/regions-browser.cjs",
+    "test:interview-browser": "node test-support/interview-browser.cjs",
+    "test:answer-help-browser": "node test-support/answer-scaffold-browser.cjs",
+    "test:scene-sheet-browser": "node test-support/scene-sheet-browser.cjs",
+    "test:word-lookup-browser": "node test-support/word-lookup-browser.cjs"
   },
   "keywords": [],
   "author": "",

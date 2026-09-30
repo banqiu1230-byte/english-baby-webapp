@@ -43,7 +43,7 @@ test('coffee: next question waits for the acknowledgment to finish, then leaves 
   assert.equal(started(), 1, 'the next question should appear within about two seconds');
 });
 
-test('coffee: a completed-step yes gets one status and a pause before the next question', async () => {
+test('coffee: a completed-step yes keeps its reply before the next question', async () => {
   const { h, started } = transitionHarness();
   h.s.localSpeechActive = false;
   h.c.scheduleTaskAdvance(1);
@@ -51,8 +51,9 @@ test('coffee: a completed-step yes gets one status and a pause before the next q
   const turn = h.c.acceptTranscriptEvent({ item_id: 'courtesy-yes' }, { allowStart: true });
   h.c.finalizeLearnerTranscript('yes', { turn });
 
-  assert.equal(h.s.dialogueHistory.at(-1).status, '已听到 · 继续下一步');
-  assert.equal(h.s.expectedResponse, null, 'yes must not start an extra model reply');
+  assert.equal(h.s.dialogueHistory.at(-1).text, 'yes');
+  assert.equal(h.s.expectedResponse?.kind, 'user', 'yes can answer a natural follow-up');
+  h.c.showUnplayedCharacterLine('You are welcome.'); h.c.settleFailedDuplexTurn();
   assert.equal(h.c.isConversationTurnPending(), false);
   await h.advance(1200);
   assert.equal(started(), 0, 'yes should not be followed by an abrupt task switch');

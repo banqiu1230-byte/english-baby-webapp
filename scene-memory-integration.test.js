@@ -20,8 +20,8 @@ function memoryHarness() {
     'coffee-service': 'choose-service', 'coffee-thanks': 'thank-person' };
   const experience = {
     store, currentSession: () => sessionId,
-    begin() { sessionId = store.beginSession({ sceneId: h.s.selectedScene, missionId: h.s.coffeeMissionId }); },
-    complete() { store.completeSession({ id: sessionId, sceneId: h.s.selectedScene }); },
+    begin() { sessionId = store.beginSession({ sceneId: h.s.selectedScene, missionId: h.s.coffeeMissionId, scope: 'life-event' }); },
+    complete() { return store.completeSession({ id: sessionId, sceneId: h.s.selectedScene }); },
     noteAnswer(context, outcome) {
       store.recordAttempt({ id: `${sessionId}:${context.messageId}`, sessionId,
         sceneId: context.sceneId, taskId: context.taskId, targetId: target[context.taskId],
@@ -34,7 +34,7 @@ function memoryHarness() {
     currentTask: () => tasks[h.s.taskIndex], currentSceneConfig: () => ({ tasks }),
     COFFEE_MISSION_UI: { C01: {}, C02: {}, C03: {}, C04: {} },
     coffeeMissionMeta: id => Coffee.getMission(id || h.s.coffeeMissionId), coffeeMissionProgress: { runs: 0 },
-    closeDuplexSession() {}, closeDialogueHistoryPanel() {},
+    closeDuplexSession() {}, closeDialogueHistoryPanel() {}, markCoffeeMissionCompleted() {},
     syncSubtitleVisibility() {}, syncTaskFocus() {}, syncActionCoach() {}, setApplePosition() {},
     hotspots: [], scheduleTaskPrompt(taskId) { h.effects.push({ type: 'prompt', taskId }); },
     speak(text) { h.effects.push({ type: 'spoken', text }); return Promise.resolve(true); },
@@ -233,6 +233,7 @@ test('server instructions scope remembered facts to a verified coffee visit and 
   const context = vm.createContext({ Coffee, Breakfast, SceneMemory: Memory });
   const declarations = ['DUPLEX_TASKS', 'SCENE_FACTS'].map(name => source.match(new RegExp(`^const ${name} = \\{[^]*?^\\};`, 'm'))[0]);
   declarations.push(source.match(/^const ACTION_REQUIRED_TASKS = .*$/m)[0]);
+  declarations.push(source.match(/^function conversationFlowInstructions\([^]*?^\}$/m)[0]);
   declarations.push(source.match(/^function duplexInstructions\([^]*?^\}$/m)[0]);
   vm.runInContext(declarations.join('\n'), context);
   const h = memoryHarness(); completeOrder(h); h.recordEvidence(); h.c.saveLearningSession();

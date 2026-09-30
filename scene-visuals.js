@@ -54,7 +54,7 @@ const LumaVisuals = (() => {
     return orderLabel(world);
   }
 
-  let adapter, layer, card, frame = null, generation = 0, pendingImage = '', lastSpeech = '';
+  let adapter, layer, frame = null, generation = 0, pendingImage = '', lastSpeech = '';
   const loaded = new Map();
   function preload(src) {
     if (!loaded.has(src)) loaded.set(src, new Promise((resolve, reject) => {
@@ -102,12 +102,6 @@ const LumaVisuals = (() => {
     const next = state.sceneStarted ? frameFor(state.selectedScene, task.id, state.selectedScene === 'coffee' ? state.coffee : state.breakfast) : null;
     if (!next) { clear(); return; }
     const isCoffee = state.selectedScene === 'coffee';
-    card.hidden = !isCoffee;
-    if (isCoffee) {
-      card.querySelector('[data-visual-caption]').textContent = next.caption;
-      card.querySelector('[data-visual-order]').textContent = storyOrderLabel(state.coffee) || '让店员知道，你今天想喝什么。';
-      card.dataset.hasOrder = Boolean(state.coffee.drink);
-    }
     adapter.scene.dataset.visualTask = task.id;
     if (frame?.image === next.image && adapter.image.getAttribute('src') === next.image && adapter.image.complete && adapter.image.naturalWidth) {
       frame = next; renderPoints(); return;
@@ -139,11 +133,10 @@ const LumaVisuals = (() => {
   function clear() {
     generation++; frame = null; pendingImage = ''; lastSpeech = '';
     if (layer) { layer.hidden = true; layer.replaceChildren(); }
-    if (card) card.hidden = true;
     if (adapter) { delete adapter.scene.dataset.visualTask; delete adapter.scene.dataset.visualImage; adapter.scene.classList.remove('visual-image-error'); }
   }
   function bind(value) {
-    adapter = value; layer = document.querySelector('#visualCues'); card = document.querySelector('#visualStory');
+    adapter = value; layer = document.querySelector('#visualCues');
     adapter.image.addEventListener('load', syncGeometry);
     window.addEventListener('resize', syncGeometry);
     // The keyboard and visualViewport can resize the scene after window.resize.

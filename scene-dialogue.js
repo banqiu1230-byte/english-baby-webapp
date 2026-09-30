@@ -3,6 +3,7 @@ const SceneDialogue = (() => {
   const coffee = typeof module !== 'undefined' && module.exports ? require('./coffee') : Coffee;
   const breakfast = typeof module !== 'undefined' && module.exports ? require('./breakfast') : Breakfast;
   const rules = typeof module !== 'undefined' && module.exports ? require('./dialogue-rules') : DialogueRules;
+  const interview = typeof module !== 'undefined' && module.exports ? require('./interview') : typeof Interview !== 'undefined' ? Interview : null;
   const conversation = () => ({ kind: 'conversation', feedback: { conversational: true } });
   const unresolved = () => ({ kind: 'unresolved', feedback: { meaning_valid: false, choice: null } });
   const ignored = reason => ({ kind: 'ignored', feedback: { discarded: true, reason, meaning_valid: false, choice: null } });
@@ -78,6 +79,29 @@ const SceneDialogue = (() => {
       },
     },
   };
+  // Interview topics are open answers. Keywords and answer length are useful
+  // context, never local evidence of correctness. The semantic judge decides
+  // relevance against the actual question; these guards only filter controls.
+  if (interview) defaults.interview = {
+    tasks: interview.tasks,
+    isConversationOnly: () => false,
+    acceptsSocialAnswer: taskId => ['interview-greeting', 'interview-closing-questions', 'interview-closing-goodbye'].includes(taskId),
+    constraints: 'Open interview conversation. Relevant experiences, preferences, past events, reflections and hypothetical approaches are valid. Meaningful no-experience answers and disclosure boundaries are valid too. Judge whether the current topic was addressed, not career quality, grammar, exact keywords, word count, or every rubric item. Social chat, help, pauses, skips, promises to answer later and unrelated replies do not complete a topic. Candidate questions are valid when the topic invites them. No invented candidate facts or hiring outcomes.',
+    facts: () => 'Alex is a fictional UI/UX interviewer. One interviewer at a desk is visible; no readable portfolio, resume, screen, or employer branding is shown. Candidate background is known only from their own spoken account.',
+    evaluate(input) {
+      const intent = interview.classifyTurn?.(input.answer);
+      if (['repeat', 'slower', 'clarify', 'help', 'pause'].includes(intent)) return { kind: 'help', feedback: { conversational: true } };
+      if (intent === 'skip' || (intent === 'stop' && input.taskId !== 'interview-closing-goodbye')) return conversation();
+      if (!String(input.answer || '').trim()) return conversation();
+      const yesNo = /^(?:yes|yeah|yep|no|nope)(?: (?:please|thanks|thank you))?$/.test(rules.normalize(input.answer));
+      const polarQuestion = /^(?:have you|did you|do you|are you|were you|can you|is that|was that|does that)\b/.test(rules.normalize(input.question));
+      if (rules.isInterviewNonAnswer(input.answer) && !this.acceptsSocialAnswer(input.taskId) && !(yesNo && polarQuestion)) return conversation();
+      return unresolved();
+    },
+    validateCandidate(input, candidate) {
+      return { meaning_valid: candidate.meaning_valid === true, choice: null };
+    },
+  };
   const conversationalTasks = {
     airport: [
       { id: 'ticket', interaction: 'speech', requiresAction: false, prompt: 'May I see your ticket?', hint: '直接说 Here you are；不用点击登机牌。' },
@@ -119,7 +143,7 @@ const SceneDialogue = (() => {
       else if ((adapter.isConversationOnly || rules.isConversationOnly)(input.answer, input.question)) result = conversation();
       else {
         result = adapter.evaluate(input);
-        if (result.kind === 'unresolved' && rules.isSmallTalk(input.answer) && !rules.matchesTask(input.taskId, input.answer)) result = conversation();
+        if (result.kind === 'unresolved' && rules.isSmallTalk(input.answer) && !adapter.acceptsSocialAnswer?.(input.taskId) && !rules.matchesTask(input.taskId, input.answer)) result = conversation();
       }
       return { changedTaskIds: [], nextTaskId: null, baseRevision: input.world?.revision ?? null, ...result };
     }
@@ -128,7 +152,8 @@ const SceneDialogue = (() => {
       return task ? { sceneId, taskId, goal: task.label || task.prompt || task.id,
         prompt: adapter.promptFor?.(taskId, world) || task.prompt || '',
         allowedChoices: Array.isArray(task.choices) ? [...task.choices] : [],
-        constraints: adapter.constraints || '', facts: adapter.facts?.(world) || '' } : null;
+        constraints: adapter.constraints || '', facts: adapter.facts?.(world) || '',
+        ...(task.rubric ? { rubric: task.rubric } : {}) } : null;
     }
     function validateCandidate(input = {}, candidate = {}) {
       const adapter = adapterFor(input), local = evaluate(input);

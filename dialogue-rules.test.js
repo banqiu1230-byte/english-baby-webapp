@@ -4,8 +4,6 @@ const {
   gentleRecast,
   matchesTask,
   requirementsMet,
-  transitionDwell,
-  transitionReplyReplacement,
 } = require('./dialogue-rules');
 const { isConversationOnly } = require('./dialogue-rules');
 
@@ -84,35 +82,6 @@ test('physical tasks advance only after speech and action', () => {
   assert.equal(requirementsMet({ ...evidence, actionDone: true, speechDone: false }), false);
   assert.equal(requirementsMet({ ...evidence, actionDone: false, speechDone: true }), false);
   assert.equal(requirementsMet({ ...evidence, actionDone: true, speechDone: true }), true);
-});
-
-test('transition questions leave a real answer window', () => {
-  assert.equal(transitionDwell('Okay.'), 2600);
-  assert.equal(transitionDwell('Do you want to keep going?'), 12000);
-});
-
-test('transition replies cannot end a scene early or open a competing topic', () => {
-  assert.equal(transitionReplyReplacement({
-    text: 'Nice job, that’s all for now.',
-    stage: 'task-complete',
-    hasMoreTasks: true,
-  }), 'Good. Let’s keep going.');
-  assert.equal(transitionReplyReplacement({
-    text: 'What do you want to talk about?',
-    stage: 'task-complete',
-    hasMoreTasks: true,
-  }), 'Okay. Let’s keep going.');
-  assert.equal(transitionReplyReplacement({
-    text: 'The milk is here.',
-    stage: 'task-complete',
-    hasMoreTasks: true,
-  }), '');
-  assert.equal(transitionReplyReplacement({
-    text: 'Would you like a small or a large americano?',
-    stage: 'task-complete',
-    hasMoreTasks: true,
-    taskAcknowledgment: 'Okay. An americano.',
-  }), 'Okay. An americano.');
 });
 
 test('gentleRecast fixes only small beginner errors with a safe correction', () => {

@@ -85,21 +85,6 @@ test('ambiguous, historical and unrecorded reminders cannot fabricate memory', (
   assert.deepEqual(story.world, before);
 });
 
-test('a reminder complaint during the quiet transition is not silently discarded as courtesy', () => {
-  const h = harness();
-  Object.assign(h.task, Coffee.tasks[1], { requiresAction: false });
-  Object.assign(h.s, {
-    selectedScene: 'coffee', coffeeMissionId: 'C01', taskIndex: 1,
-    coffee: order('A small latte.'), stage: 'task-complete',
-    coveredGoals: new Set(['coffee-order', 'coffee-size']),
-    conversationFocus: 'task',
-  });
-  h.c.scheduleTaskAdvance = () => {};
-  const message = { id: 1, speaker: 'user', text: 'I already said small.', final: true };
-  const swallowed = h.c.acknowledgeCompletedTurn(message.text, message);
-  assert.equal(swallowed, false, 'a complaint needs an answer even while between order steps');
-});
-
 for (const stage of ['active', 'task-complete', 'complete']) {
 test(`${stage}: a remembered-fact reminder is one audible repair and no failed attempt`, async () => {
   const noted = [];

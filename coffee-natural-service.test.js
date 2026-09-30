@@ -142,7 +142,7 @@ function voiceHarness() {
   Object.assign(h.task, tasks[0]);
   h.s.activeQuestion = Coffee.nextPrompt(h.s.coffee);
   h.s.currentSpeech = h.s.activeQuestion;
-  h.load('looksLikeReasoningLeak', 'asksForCompletedAction', 'transitionReplyReplacement',
+  h.load('looksLikeReasoningLeak', 'asksForCompletedAction',
     'safeCharacterReply', 'publishDuplexSubtitle', 'releaseDuplexAudioGate');
   return h;
 }
@@ -237,10 +237,10 @@ test('C02 ASR For here advances once; a late provider request to say To go is di
   await send({ type: 'response.output_audio.delta', ...id, audio: 'AAAA' });
   assert.equal(h.effects.some(e => e.type === 'caption' || e.type === 'audio'), false);
   assert.equal(h.effects.filter(e => e.type === 'scored').length, 1);
-  const spoken = h.effects.filter(e => e.type === 'spoken').map(e => e.text);
-  assert.equal(spoken.length, 1);
-  assert.match(spoken[0], /for here/i);
-  assert.doesNotMatch(spoken[0], /to go|check|say/i);
+  const repairs = h.effects.filter(e => e.type === 'replaced').map(e => e.text);
+  assert.equal(repairs.length, 1, 'the factual guard, not normal progression, supplies the repair');
+  assert.match(repairs[0], /for here/i);
+  assert.doesNotMatch(repairs[0], /to go|check|say/i);
 });
 
 test('ASR Small on the drink question records the size and audibly acknowledges it without completing drink', async () => {

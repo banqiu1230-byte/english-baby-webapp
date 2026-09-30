@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const Learning = require('./learning-evidence');
 const WorldLoop = require('./world-learning-loop');
+const Life = require('./life-experience');
 
 // Exercise the real UI bridge and evidence store without starting speech or a browser.
 const experienceSource = fs.readFileSync(path.join(__dirname, 'learning-experience.js'), 'utf8');
@@ -56,29 +57,30 @@ class Element {
   }
   dispatch(type) { for (const callback of this.listeners.get(type) || []) callback({}); }
   focus() {}
+  scrollIntoView(options) { this.scrolledIntoView = options; }
 }
 
 function setup({ sceneId = 'kitchen', storage = memoryStorage(), coffeeJourney = null, activeTaskIds = null } = {}) {
   const guidance = new Element();
   const nodes = new Map([
     'learningHelpPanel', 'learningHelpContent', 'reviewSpoken', 'reviewTransferTitle', 'reviewTransferCopy',
-    'repeatScene', 'todayTitle', 'openDialogueHistory', 'learningNotesTitle', 'growthSummary',
-    'reviewOverviewTitle', 'reviewOverviewCopy', 'startReview', 'reviewQueueList', 'strengthCount',
-    'strengthList', 'achievementCompleted', 'achievementIndependent', 'achievementTargets',
+    'repeatScene', 'todayTitle', 'openDialogueHistory',
+    'reviewOverviewTitle', 'reviewOverviewCopy', 'startReview', 'reviewQueueList',
+    'achievementCompleted', 'achievementIndependent', 'achievementTargets',
     'achievementTransfer', 'learningHistory', 'todayMissionCode', 'adventureJourneyTitle', 'adventureRoute',
     'chooseCoffeeMission', 'todaySubtitle', 'todayContext', 'todayHero',
     'worldChapter', 'worldChapterLabel', 'worldChapterTitle', 'worldChapterReason',
     'worldFocus', 'worldFocusTitle', 'worldFocusReason', 'worldFocusMeaning', 'worldFocusKeyword',
     'worldFocusReveal', 'worldFocusExample', 'worldFocusTry', 'worldAlternative',
-    'worldEvidenceSection', 'worldEvidenceTitle', 'worldEvidenceList', 'notesEvidenceList', 'notesEvidenceHistory', 'learningStageLabel',
+    'notesEvidenceList', 'notesEvidenceHistory', 'learningStageLabel',
     'reviewEvidenceList', 'reviewRecast',
-    'notesReviewCount', 'notesReviewScene', 'notesReviewEyebrow', 'notesReviewImage', 'notesPracticeFold', 'notesHistorySummary',
+    'notesReviewCount', 'notesReviewScene', 'notesReviewEyebrow', 'notesReviewImage', 'notesHistorySummary', 'sceneDictionary',
   ].map(id => [id, new Element()]));
   const panel = nodes.get('learningHelpPanel');
   const modalParent = new Element(), sceneContent = new Element(), helpButton = new Element();
   modalParent.append(sceneContent, panel);
   panel.append(helpButton, nodes.get('learningHelpContent'));
-  panel.selectors.set('.learning-help-sheet button', [helpButton]);
+  panel.selectors.set('[data-learning-help="close"]', [helpButton]);
   panel.hidden = true;
   const journeySwitch = new Element(), primaryCta = new Element();
   const document = Object.assign(new Element(), {
@@ -88,7 +90,7 @@ function setup({ sceneId = 'kitchen', storage = memoryStorage(), coffeeJourney =
       : selector === '.journey-switch' ? journeySwitch : selector === '.primary-cta' ? primaryCta : null,
     querySelectorAll: () => [], createElement: () => new Element(),
   });
-  const window = Object.assign(new Element(), { localStorage: storage, LumaWorldLoop: WorldLoop });
+  const window = Object.assign(new Element(), { localStorage: storage, LumaWorldLoop: WorldLoop, LumaLifeExperience: Life });
   helpButton.focus = () => { document.activeElement = helpButton; };
   const context = vm.createContext({ window, document, LumaLearning: Learning, LumaWorldLoop: WorldLoop });
   vm.runInContext(experienceSource, context, { filename: 'learning-experience.js' });
@@ -254,7 +256,7 @@ test('help revealed while evaluation is pending cannot become an independent res
   assert.equal(f.api.store.summary().independentCount, 0);
 });
 
-test('closing the help sheet resumes silence guidance exactly once', () => {
+test('closing inline help resumes silence guidance exactly once', () => {
   const f = setup(); f.begin();
   f.api.openHelp();
   assert.deepEqual(f.guidanceEvents, ['pause']);
@@ -409,26 +411,29 @@ test('completing a session clears recovery and late page lifecycle events do not
   assert.equal(setup({ storage: f.storage }).api.store.getCheckpoint(), null);
 });
 
-test('home and review recommend the same bounded coffee and breakfast continuation', () => {
+test('home continues life events while results can recommend a learning transfer', () => {
   const rotation = [
     ['kitchen', 'coffee', '下次出门，再点一杯', 'Milk, please.'],
     ['coffee', 'kitchen', '回到家，一起准备早餐', 'A latte, please.'],
   ];
   for (const [sceneId, expected, title, answer] of rotation) {
-    const f = setup({ sceneId }); f.begin();
+    const f = setup({ sceneId });
+    if (sceneId === 'coffee') f.state.coffeeMissionId = 'C01';
+    f.begin();
     f.api.noteAnswer(f.capture({ answer }));
     f.state.stage = 'complete'; f.api.complete();
     f.api.renderReview();
     assert.equal(f.nodes.get('reviewTransferTitle').textContent, title);
     f.api.startHome();
-    assert.equal(f.starts[0].sceneId, expected);
+    assert.equal(f.starts[0].sceneId, 'coffee');
+    assert.equal(f.starts[0].options.missionId, sceneId === 'coffee' ? 'C02' : 'C01');
     f.api.startTransfer({ fromReview: true });
     assert.equal(f.starts[1].sceneId, expected);
     assert.equal(f.starts[0].options.subtitlesHidden, f.starts[1].options.subtitlesHidden);
   }
 });
 
-test('supported coffee completion recommends an optional lighter-support retry instead of fixed mission advancement', () => {
+test('supported coffee completion keeps optional retry in results without replacing the next life event', () => {
   const f = setup({ sceneId: 'coffee', coffeeJourney: {
     completed: ['C01'], nextMissionId: 'C02', nextMissionTitle: '替朋友点对那一杯',
   } });
@@ -445,8 +450,8 @@ test('supported coffee completion recommends an optional lighter-support retry i
   assert.equal(f.nodes.get('worldAlternative').hidden, false);
   f.api.startHome();
   assert.equal(f.starts[0].sceneId, 'coffee');
-  assert.equal(f.starts[0].options.missionId, 'C01');
-  assert.equal(f.starts[0].options.subtitlesHidden, true);
+  assert.equal(f.starts[0].options.missionId, 'C02');
+  assert.equal(f.starts[0].options.subtitlesHidden, false);
   f.nodes.get('worldAlternative').dispatch('click');
   assert.equal(f.starts[1].sceneId, 'kitchen');
   assert.equal(f.starts[1].options.subtitlesHidden, false);
@@ -593,7 +598,7 @@ test('coffee remembers the selected mission but restarts its dialogue on the nex
 
   const restored = setup({ sceneId: 'coffee', storage: f.storage });
   restored.api.renderHome();
-  assert.equal(restored.primaryCta.textContent, '继续这件事');
+  assert.equal(restored.primaryCta.textContent, '继续生活');
   assert.equal(restored.nodes.get('chooseCoffeeMission').hidden, false);
   restored.api.startHome();
   const { sceneId, options } = restored.starts[0];
@@ -626,7 +631,7 @@ test('a spoken coffee drink choice shares its practice target with breakfast', (
   assert.equal(f.api.store.summary().independentCount, 1);
 });
 
-test('learning notes render due practice and real support needs without treating technical errors as learner weakness', () => {
+test('learning notes keep due review and all evidence without the redundant practice entry', () => {
   const f = setup();
   const sessionId = f.begin();
   const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
@@ -652,17 +657,13 @@ test('learning notes render due practice and real support needs without treating
   assert.equal(f.nodes.get('reviewOverviewTitle').textContent, '再选一杯喜欢的饮料');
   assert.equal(f.nodes.get('notesReviewCount').textContent, '1 项待复习');
   assert.equal(f.nodes.get('reviewQueueList').children.length, 0);
-  assert.equal(f.nodes.get('strengthCount').textContent, '1 项');
-  assert.equal(f.nodes.get('strengthList').children.length, 1);
-  assert.match(f.nodes.get('strengthList').children[0].children[1].children[1].textContent, /意思未确认/);
+  assert.deepEqual(f.api.store.getProfile().attempts.map(attempt => attempt.outcome),
+    ['success', 'unconfirmed', 'technical-error']);
+  assert.deepEqual(f.api.store.getReviewQueue().map(item => item.targetId), ['choose-drink'],
+    'Removing a duplicate entry must preserve real review and must not promote technical errors into weaknesses');
   assert.equal(f.nodes.get('achievementCompleted').textContent, '1');
   assert.equal(f.nodes.get('achievementIndependent').textContent, '0');
-  assert.doesNotMatch(f.nodes.get('growthSummary').textContent, /发音|语法|掌握率/);
-
-  const previewButton = f.nodes.get('strengthList').children[0].children[2];
-  previewButton.dispatch('click');
-  assert.deepEqual(f.previews, [{ sceneId: 'kitchen', missionId: null }]);
-  assert.equal(f.starts.length, 0, 'a note item opens preview without starting voice practice');
+  assert.doesNotMatch(f.nodes.get('reviewOverviewCopy').textContent, /发音|语法|掌握率/);
 
   f.nodes.get('startReview').dispatch('click');
   assert.equal(f.starts.length, 1);
@@ -692,7 +693,7 @@ test('learning-note achievements count completed experiences, independent produc
   assert.match(f.nodes.get('learningHistory').children[0].children[1].children[1].textContent, /独立表达/);
 });
 
-test('today review keeps one concrete activity and summarizes other due items', () => {
+test('today review keeps one activity and its count without listing other due items', () => {
   const f = setup();
   const sessionId = f.begin();
   const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
@@ -706,9 +707,9 @@ test('today review keeps one concrete activity and summarizes other due items', 
   f.api.render();
 
   assert.equal(f.nodes.get('notesReviewCount').textContent, '4 项待复习');
-  assert.equal(f.nodes.get('reviewQueueList').children.length, 1);
-  assert.match(f.nodes.get('reviewQueueList').children[0].textContent, /还可以复习/);
-  assert.equal(f.nodes.get('reviewQueueList').children.filter(child => child.className.includes('learning-note-row')).length, 0);
+  assert.equal(f.api.store.getReviewQueue().length, 4);
+  assert.equal(f.nodes.get('startReview').textContent, '开始复习');
+  assert.equal(f.nodes.get('reviewQueueList').children.length, 0);
 });
 
 test('today review bypasses another saved scene and starts at the due target task', () => {
@@ -751,7 +752,7 @@ test('home continues the remembered mission before due practice while the review
     supportLevel: 2, conditionsTracked: true, promptModality: 'audio-text', outcome: 'success', at: twoDaysAgo,
   });
   f.api.renderHome();
-  assert.equal(f.primaryCta.textContent, '继续这件事');
+  assert.equal(f.primaryCta.textContent, '继续生活');
   f.api.startHome();
   assert.equal(f.starts[0].sceneId, 'kitchen');
   assert.equal(f.starts[0].options.resumeCheckpoint.sessionId, kitchenSession);
@@ -782,7 +783,7 @@ test('result continuation consumes the same saved mission as home instead of cre
   assert.equal(f.starts[0].options.skipIntro, true);
 });
 
-test('home review action starts at the due target instead of replaying the scene from task one', () => {
+test('due learning never replaces the world entry and remains reachable through explicit review', () => {
   const f = setup({ coffeeJourney: { completed: ['C01', 'C02', 'C03', 'C04'], nextMissionId: null } });
   const coffeeSession = f.api.store.beginSession({
     sceneId: 'coffee', missionId: 'C04', variantId: 'C04-large-americano-here',
@@ -801,105 +802,203 @@ test('home review action starts at the due target instead of replaying the scene
 
   assert.equal(f.starts.length, 1);
   assert.equal(f.starts[0].sceneId, 'coffee');
-  assert.equal(f.starts[0].options.reviewTaskId, 'coffee-service');
-  assert.equal(f.starts[0].options.startTaskIndex, 2);
-  assert.deepEqual(f.starts[0].options.reviewTargetIds, ['choose-service']);
-  assert.equal(f.starts[0].options.missionId, 'C04');
+  assert.equal(f.starts[0].options.reviewTaskId, null);
+  assert.equal(f.starts[0].options.startTaskIndex, 0);
+  assert.equal(f.starts[0].options.reviewTargetIds.length, 0);
+  assert.equal(f.starts[0].options.missionId, 'C01');
   f.api.startHome({ chooseMission: true });
   assert.equal(f.starts[1].options.skipIntro, false);
   assert.equal(f.starts[1].options.reviewTaskId, null);
   assert.equal(f.starts[1].options.startTaskIndex, 0);
   assert.equal(f.starts[1].options.reviewTargetIds.length, 0);
+  f.api.startReviewPractice();
+  assert.equal(f.starts[2].options.reviewTaskId, 'coffee-service');
+  assert.equal(f.starts[2].options.startTaskIndex, 2);
 });
 
-test('review button falls back to the most recently completed scene when nothing is due', () => {
+test('life completion awards once while target practice leaves the pending world event intact', () => {
+  const f = setup({ sceneId: 'coffee' });
+  f.state.coffeeMissionId = 'C01';
+  const pending = f.begin();
+  f.state.sessionScope = 'target-practice';
+  const practice = f.begin();
+  assert.notEqual(practice, pending);
+  assert.equal(f.api.store.getCheckpoint().sessionId, pending);
+  f.state.stage = 'complete';
+  assert.equal(f.api.complete().scope, 'target-practice');
+  assert.equal(f.api.lifeStore.summary().totalXP, 0);
+  assert.equal(f.api.currentReward(), null);
+  assert.equal(f.api.homeStep().sessionId, pending);
+  f.state.sessionScope = 'life-event';
+  const full = f.begin();
+  assert.ok(f.api.store.getProfile().sessions.find(item => item.id === pending).supersededAt);
+  f.state.stage = 'complete';
+  assert.equal(f.api.complete().id, full);
+  assert.equal(f.api.currentReward().sessionXP, 30);
+  f.api.complete();
+  assert.equal(f.api.lifeStore.summary().totalXP, 30);
+  assert.equal(f.api.lifeStore.summary().completedCount, 1);
+  assert.equal(f.api.store.getCheckpoint(), null);
+  const reloaded = setup({ storage: f.storage });
+  assert.equal(reloaded.api.lifeStore.summary().totalXP, 30);
+});
+
+test('bridge refuses a completion before the app declares the event complete', () => {
+  const f = setup();
+  f.begin();
+  assert.equal(f.api.complete(), null);
+  assert.equal(f.api.store.summary().completedSessions, 0);
+  assert.equal(f.api.lifeStore.summary().totalXP, 0);
+});
+
+test('legacy sessions remain history without earning XP or driving world completion', () => {
+  const storage = memoryStorage();
+  const legacy = Learning.createStore(storage);
+  const id = legacy.beginSession({ sceneId: 'coffee', missionId: 'C01' });
+  legacy.completeSession({ id, sceneId: 'coffee' });
+  const f = setup({ storage });
+  assert.equal(f.api.store.summary().completedSessions, 1);
+  assert.equal(f.api.lifeStore.summary().totalXP, 0);
+  assert.equal(f.api.homeStep().kind, 'start');
+  assert.equal(f.api.homeStep().missionId, 'C01');
+});
+
+test('dictionary study creates no practice session and carries help only into its next matching response', () => {
+  const f = setup({ sceneId: 'coffee' });
+  assert.equal(f.api.recordStudy('coffee', 'bag', 'full-example'), null);
+  f.api.recordStudy('coffee', 'coffee-order', 'full-example');
+  assert.equal(f.api.store.getProfile().sessions.length, 0);
+  assert.equal(f.api.lifeStore.summary().completedCount, 0);
+  const restored = setup({ sceneId: 'coffee', storage: f.storage });
+  restored.state.coffeeMissionId = 'C01';
+  restored.begin();
+  restored.api.noteAnswer(restored.capture({ answer: 'A latte, please.' }));
+  const first = restored.api.store.getProfile().attempts.at(-1);
+  assert.equal(first.productionCondition, 'assisted');
+  assert.ok(first.exposureKinds.includes('full-example'));
+  restored.state.stage = 'complete'; restored.api.complete();
+  restored.begin();
+  restored.api.noteAnswer(restored.capture({ answer: 'An americano, please.' }));
+  assert.equal(restored.api.store.getProfile().attempts.at(-1).productionCondition, 'independent');
+});
+
+test('navigation receives one shared snapshot with life XP and the matching continuation', () => {
+  const f = setup({ sceneId: 'airport' });
+  const snapshots = [];
+  f.window.LumaNavigation = { render: value => snapshots.push(value) };
+  f.begin(); f.api.render();
+  assert.equal(snapshots.at(-1).next.sceneId, 'airport');
+  assert.equal(snapshots.at(-1).next.sessionId, f.api.currentSession());
+  assert.equal(snapshots.at(-1).life.totalXP, 0);
+  assert.equal(f.api.catalog.SCENE_TASKS.airport[0], 'ticket');
+  f.api.previewScene('coffee', 'C03');
+  assert.deepEqual(f.previews.at(-1), { sceneId: 'coffee', missionId: 'C03' });
+});
+
+test('review button browses the dictionary when the next review is in the future', () => {
   const f = setup({ sceneId: 'airport' });
   f.begin();
   f.api.noteAnswer(f.capture({ answer: 'Here you are.' }));
   f.state.stage = 'complete';
   f.api.complete();
   assert.equal(f.api.store.summary().dueCount, 0);
-
+  f.api.render();
+  assert.equal(f.nodes.get('reviewOverviewTitle').textContent, '今天没有待复习');
+  assert.match(f.nodes.get('reviewOverviewCopy').textContent, /下一次复习在/);
+  assert.equal(f.nodes.get('startReview').textContent, '看看情景词典');
   f.nodes.get('startReview').dispatch('click');
-  assert.equal(f.starts.length, 1);
-  assert.equal(f.starts[0].sceneId, 'airport');
+  assert.equal(f.starts.length, 0);
+  assert.equal(f.nodes.get('sceneDictionary').scrolledIntoView.block, 'start');
+});
+
+test('empty learning state browses the dictionary without consuming an unfinished life event', () => {
+  const f = setup({ sceneId: 'airport' });
+  const pending = f.begin(); f.api.checkpoint();
+  f.api.render();
+  assert.equal(f.nodes.get('reviewOverviewTitle').textContent, '今天没有待复习');
+  assert.equal(f.nodes.get('startReview').textContent, '看看情景词典');
+  f.nodes.get('startReview').dispatch('click');
+  assert.equal(f.starts.length, 0);
+  assert.equal(f.nodes.get('sceneDictionary').scrolledIntoView.block, 'start');
+  assert.equal(f.api.store.getCheckpoint().sessionId, pending);
 });
 
 
-function notesAttempt(f, { id, day, supportLevel = 0, source = 'voice', language = 'en', outcome = 'success', targetId = 'choose-drink', sceneId = 'coffee', promptModality = 'audio-text', utterance, heardQuestion }) {
-  const sessionId = f.api.store.beginSession({ sceneId });
+function notesAttempt(f, { id, day, supportLevel = 0, source = 'voice', language = 'en', outcome = 'success', targetId = 'choose-drink', sceneId = 'coffee', promptModality = 'audio-text', utterance, heardQuestion, sessionId = f.api.store.beginSession({ sceneId }) }) {
   return f.api.store.recordAttempt({ id, sessionId, sceneId, taskId: sceneId === 'coffee' ? 'coffee-order' : 'breakfast-drink', targetId,
     source, language, supportLevel, conditionsTracked: true, promptModality, outcome, utterance, heardQuestion,
     at: new Date(Date.now() - day * 86400000).toISOString() });
 }
 
-test('notes do not turn unchanged, less independent, or unknown records into a progress card', () => {
+test('collapsed evidence history preserves unchanged, less independent, and unknown records', () => {
   for (const pair of [[0, 0], [0, 3], [null, 0], [3, 3]]) {
     const f = setup();
     notesAttempt(f, { id: 'before', day: 2, supportLevel: pair[0] });
     notesAttempt(f, { id: 'after', day: 1, supportLevel: pair[1] });
     f.api.render();
-    assert.equal(f.nodes.get('worldEvidenceSection').hidden, true, JSON.stringify(pair));
-    assert.equal(f.nodes.get('worldEvidenceList').children.length, 0);
     assert.equal(f.nodes.get('notesEvidenceList').children.length, 2, 'raw records remain available in collapsed history');
+    assert.equal(f.api.store.getProfile().attempts.length, 2);
   }
 });
 
-test('notes show only the newest supported-to-independent improvement, without a mastery claim', () => {
+test('evidence history retains both helped and independent responses without a mastery claim', () => {
   const f = setup();
   notesAttempt(f, { id: 'old-assisted', day: 4, supportLevel: 3 });
   notesAttempt(f, { id: 'old-free', day: 3 });
   notesAttempt(f, { id: 'new-assisted', day: 2, targetId: 'choose-size', supportLevel: 3 });
   notesAttempt(f, { id: 'new-free', day: 1, targetId: 'choose-size' });
   f.api.render();
-  assert.equal(f.nodes.get('worldEvidenceSection').hidden, false);
-  assert.equal(f.nodes.get('worldEvidenceList').children.length, 1);
-  const card = f.nodes.get('worldEvidenceList').children[0];
-  assert.equal(card.children[0].textContent, '说明想要的杯型');
-  assert.match(card.children[1].children[1].children[1].textContent, /没看答案/);
-  assert.doesNotMatch(card.children[2].textContent, /掌握|学会|百分/);
+  const history = f.nodes.get('notesEvidenceList');
+  assert.equal(history.children.length, 4);
+  assert.match(renderedText(history.children[0]), /说明想要的杯型.*未看答案/);
+  assert.doesNotMatch(renderedText(history.children[1]), /未看答案|无字幕/);
+  assert.equal(f.api.store.getProfile().attempts.find(item => item.id === 'new-assisted').productionCondition, 'assisted');
+  assert.doesNotMatch(renderedText(history), /掌握|学会|百分/);
 });
 
-test('notes suppress stale success when the latest response remains unconfirmed', () => {
+test('history clearly identifies the latest unconfirmed response while keeping earlier evidence', () => {
   const f = setup();
   notesAttempt(f, { id: 'assisted', day: 3, supportLevel: 3 });
   notesAttempt(f, { id: 'free', day: 2 });
   notesAttempt(f, { id: 'unconfirmed', day: 1, outcome: 'unconfirmed' });
   f.api.render();
-  assert.equal(f.nodes.get('worldEvidenceSection').hidden, true);
+  assert.equal(f.nodes.get('notesEvidenceList').children.length, 3);
+  assert.match(renderedText(f.nodes.get('notesEvidenceList').children[0]), /这次还未确认意思/);
 });
 
 const renderedText = node => [node.textContent || '', ...node.children.map(renderedText)].join(' ');
 
-test('one notes takeaway preserves the exact heard line and successful voice reply', () => {
-  const f = setup();
-  notesAttempt(f, { id: 'phrase', day: 1, utterance: 'A latte, please.', heardQuestion: 'What would you like today?' });
-  f.api.render();
-  const cards = f.nodes.get('worldEvidenceList').children;
+test('the completion takeaway preserves the exact heard line and successful voice reply', () => {
+  const f = setup({ sceneId: 'coffee' });
+  f.begin();
+  notesAttempt(f, { id: 'phrase', day: 1, sessionId: f.api.currentSession(), utterance: 'A latte, please.', heardQuestion: 'What would you like today?' });
+  f.api.renderReview();
+  const cards = f.nodes.get('reviewEvidenceList').children;
   assert.equal(cards.length, 1);
-  assert.equal(f.nodes.get('worldEvidenceTitle').textContent, '这句英语，你用上了');
   assert.match(renderedText(cards[0]), /What would you like today\?/);
   assert.match(renderedText(cards[0]), /A latte, please\./);
   assert.doesNotMatch(renderedText(cards[0]), /掌握|学会了|听懂了/);
 });
 
 test('a reply with missing heard evidence never receives a reconstructed question', () => {
-  const f = setup();
-  notesAttempt(f, { id: 'phrase', day: 1, utterance: 'Small, please.', targetId: 'choose-size', supportLevel: null });
-  f.api.render();
-  const text = renderedText(f.nodes.get('worldEvidenceList'));
+  const f = setup({ sceneId: 'coffee' });
+  f.begin();
+  notesAttempt(f, { id: 'phrase', day: 1, sessionId: f.api.currentSession(), utterance: 'Small, please.', targetId: 'choose-size', supportLevel: null });
+  f.api.renderReview();
+  const text = renderedText(f.nodes.get('reviewEvidenceList'));
   assert.match(text, /Small, please\./);
   assert.match(text, /帮助条件尚未确认/);
   assert.doesNotMatch(text, /对方说|Would you|无字幕|未看答案/);
 });
 
-test('unconfirmed or typed utterances cannot become the latest spoken takeaway', () => {
+test('unconfirmed or typed utterances cannot become the completion spoken takeaway', () => {
   for (const invalid of [{ outcome: 'unconfirmed' }, { source: 'text' }, { language: 'zh' }]) {
-    const f = setup();
-    notesAttempt(f, { id: 'before', day: 2, utterance: 'A latte, please.' });
-    notesAttempt(f, { id: 'later', day: 1, utterance: 'This is not a confirmed spoken response.', ...invalid });
-    f.api.render();
-    assert.equal(f.nodes.get('worldEvidenceSection').hidden, true);
+    const f = setup({ sceneId: 'coffee' });
+    f.begin();
+    notesAttempt(f, { id: 'before', day: 2, sessionId: f.api.currentSession(), utterance: 'A latte, please.' });
+    notesAttempt(f, { id: 'later', day: 1, sessionId: f.api.currentSession(), utterance: 'This is not a confirmed spoken response.', ...invalid });
+    f.api.renderReview();
+    assert.doesNotMatch(renderedText(f.nodes.get('reviewEvidenceList')), /A latte|This is not/);
   }
 });
 
@@ -936,7 +1035,7 @@ test('home resumes the saved life encounter without exposing its internal missio
   assert.equal(f.nodes.get('todayTitle').textContent, '拿到的咖啡，好像不太对');
   assert.match(f.nodes.get('todaySubtitle').textContent, /小杯拿铁.*带走.*留下这杯/);
   assert.doesNotMatch(f.nodes.get('todayMissionCode').textContent, /C03|任务|委托/);
-  assert.equal(f.primaryCta.textContent, '继续这件事');
+  assert.equal(f.primaryCta.textContent, '继续生活');
   assert.equal(f.nodes.get('chooseCoffeeMission').hidden, false);
   f.api.startHome();
   assert.equal(f.starts[0].options.missionId, 'C03');
@@ -955,4 +1054,20 @@ test('conversation header shows the person and place while task indices stay int
       assert.equal(f.nodes.get('learningStageLabel').textContent, 'Maya · 初次拜访');
     }
   }
+});
+
+
+test('speaking with inline help releases guidance once without hiding the read-aloud sentence', () => {
+  const f = setup(); f.begin();
+  f.api.openHelp();
+  assert.equal(f.api.isHelpOpen(), true);
+  assert.equal(f.api.isHelpVisible(), true);
+  f.api.learnerTurnStarted();
+  assert.equal(f.api.isHelpOpen(), false);
+  assert.equal(f.api.isHelpVisible(), true);
+  f.api.learnerTurnStarted();
+  assert.deepEqual(f.guidanceEvents, ['pause', 'resume']);
+  f.api.questionChanged();
+  assert.equal(f.api.isHelpVisible(), false);
+  assert.deepEqual(f.guidanceEvents, ['pause', 'resume']);
 });

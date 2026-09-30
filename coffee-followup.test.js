@@ -30,7 +30,7 @@ function coffeeHarness(taskIndex = 0) {
   h.s.activeQuestion = Coffee.promptFor(h.task.id, h.s.coffee);
   h.s.currentSpeech = h.s.activeQuestion;
   h.load('coffeeTaskForChangedField', 'latestFollowupText', 'clearTaskAdvance', 'scheduleTaskAdvance',
-    'looksLikeReasoningLeak', 'asksForCompletedAction', 'transitionReplyReplacement', 'safeCharacterReply',
+    'looksLikeReasoningLeak', 'asksForCompletedAction', 'safeCharacterReply',
     'publishDuplexSubtitle', 'releaseDuplexAudioGate', 'applyDynamicFeedback');
   return h;
 }
@@ -50,9 +50,11 @@ for (const answer of ['yes', '对', 'ok', '嗯', '好的']) {
 
     assert.equal(h.s.dialogueHistory.at(-1).text, answer, 'keep what the learner said');
     assert.equal(h.s.coffee.size, null, 'an acknowledgment does not choose a size');
-    assert.equal(h.s.expectedResponse, null, 'a completed step must not wait for a new free-form provider reply');
-    assert.equal(h.c.isConversationTurnPending(), false, 'ordinary politeness must not hold the lesson transition');
-    assert.equal(h.effects.some(effect => effect.type === 'feedback'), false);
+    assert.equal(h.s.expectedResponse?.kind, 'user', 'courtesy keeps its natural response turn');
+    h.c.showUnplayedCharacterLine('You are welcome.');
+    h.c.settleFailedDuplexTurn();
+    assert.equal(h.c.isConversationTurnPending(), false);
+    assert.equal(h.effects.some(effect => effect.type === 'scored'), false);
     await h.advance(3000);
     assert.equal(nextTask, 1, 'the size question should appear within the normal transition dwell');
   });
@@ -124,7 +126,7 @@ test('C01: provider acknowledgment racing the ASR final cannot precede a second 
   assert.equal(h.s.stage, 'task-complete');
   const confirmations = h.effects.filter(effect => ['caption', 'spoken'].includes(effect.type));
   assert.equal(confirmations.length, 1, 'one answer must produce one acknowledgment, without an interrupted duplicate');
-  assert.equal(confirmations[0].text, 'Okay. An americano.');
+  assert.equal(confirmations[0].text, 'Got it, an americano.');
   assert.equal(h.effects.filter(effect => effect.type === 'scored').length, 1);
   const revision = h.s.coffee.revision;
   // Duplicate finals and the final watchdog must not reopen the resolved turn.
@@ -185,14 +187,16 @@ for (const reply of ['Okay.', 'Small, got it.']) for (const withAudio of [true, 
   assert.equal(h.s.dialogueHistory.some(message => message.speaker === 'luma'), false,
     'a terminal text-only reply must also wait for the learner decision');
   resolveFetch({ ok: true, json: async () => ({ meaning_valid: true, choice: 'small' }) });
-  await h.advance(0);
+  await h.advance(0); await h.advance(0);
   assert.equal(h.s.coffee.size, 'small');
   assert.equal(h.s.stage, 'task-complete');
   assert.equal(h.c.learnerDecisionPending(), false);
-  assert.equal(h.c.isConversationTurnPending(), false);
-  assert.equal(h.effects.some(effect => ['caption', 'audio'].includes(effect.type)), false,
-    'the canceled free-form reply must never play after the local acknowledgment');
-  assert.deepEqual(h.effects.filter(effect => effect.type === 'spoken').map(effect => effect.text), ['Okay. A small americano.']);
+  assert.equal(h.c.isConversationTurnPending(), withAudio);
+  if (withAudio) {
+    assert.deepEqual(h.effects.filter(effect => effect.type === 'caption').map(effect => effect.text), [reply]);
+    assert.equal(h.effects.filter(effect => effect.type === 'audio').length, 1);
+  } else assert.equal(h.s.dialogueHistory.at(-1).text, reply);
+  assert.equal(h.effects.some(effect => effect.type === 'spoken'), false, 'no canned acknowledgment replaces the confirmed provider reply');
   assert.equal(h.effects.filter(effect => effect.type === 'scored').length, 1);
 });
 
@@ -211,9 +215,10 @@ for (const answer of ['For here.', 'For here, yeah.']) {
     h.c.finalizeLearnerTranscript(answer, { turn });
     assert.equal(h.s.coffee.service, 'here');
     assert.equal(h.s.coffee.received, false);
-    assert.equal(h.s.expectedResponse, null);
+    assert.equal(h.s.expectedResponse?.kind, 'user');
+    h.c.showUnplayedCharacterLine('For here, understood.'); h.c.settleFailedDuplexTurn();
     assert.equal(h.c.isConversationTurnPending(), false);
-    assert.equal(h.effects.some(effect => effect.type === 'feedback'), false);
+    assert.equal(h.effects.some(effect => effect.type === 'scored'), false);
     await h.advance(3000);
     assert.equal(nextTask, 3);
   });
@@ -266,14 +271,14 @@ test('C01: answering during a guarded reply retry leaves the new confirmation au
   await send({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'actual-small', text: 'Small.' });
   assert.equal(h.s.coffee.size, 'small');
   assert.equal(h.s.stage, 'task-complete');
-  assert.equal(h.s.expectedResponse?.kind, 'say');
+  assert.equal(h.s.expectedResponse?.kind, 'user');
   assert.equal(h.s.suppressDuplexResponse, false, 'the learner answer retires the old suppression as well as its reply');
   const current = h.s.expectedResponse;
   const fresh = { response_id: 'small-confirmation' };
   await send({ type: 'response.output_audio.started', ...fresh });
   await send({ type: 'response.output_text.done', ...fresh, text: 'Okay. A small americano.' });
   await send({ type: 'response.output_audio.delta', ...fresh, audio: 'AAAA' });
-  assert.equal(current.audioStarted, true, 'the new say must accept audio.started');
+  assert.equal(current.audioStarted, true, 'the new response must accept audio.started');
   assert.ok(h.effects.some(effect => effect.type === 'caption' && effect.text === 'Okay. A small americano.'));
   assert.equal(h.effects.filter(effect => effect.type === 'audio').length, 1, 'new audio must pass the text gate');
 
@@ -281,7 +286,7 @@ test('C01: answering during a guarded reply retry leaves the new confirmation au
   assert.equal(h.s.expectedResponse, current, 'the canceled retry must not replace the new confirmation');
   assert.equal(h.s.suppressDuplexResponse, false);
   const requestedLines = h.effects.filter(effect => effect.type === 'send' && effect.data.type === 'say').map(effect => effect.data.text);
-  assert.deepEqual(requestedLines, ['Okay. A small americano.']);
+  assert.deepEqual(requestedLines, [], 'the canceled fallback must not replace the natural confirmation');
   assert.equal(h.s.dialogueHistory.some(message => message.status?.includes('语音未播放')), false);
 });
 
@@ -361,9 +366,9 @@ test('a follow-up chat after confirming the drink pauses task advancement and ke
   h.c.scheduleTaskAdvance(1);
   const send = await connect(h);
   await send({type:'conversation.item.input_audio_transcription.completed',item_id:'chat',text:'How is your day?'});
-  assert.equal(h.s.conversationFocus, 'chat');
-  assert.equal(h.s.advanceTimer, null);
-  assert.equal(h.c.transitionReplyReplacement('Good, thanks! How about you?'), '');
+  assert.equal(h.s.conversationFocus, 'task');
+  await send({type:'response.output_text.done',question_id:'chat',response_id:'chat-reply',text:'Good, thanks! How about you?'});
+  await send({type:'response.done',question_id:'chat',response_id:'chat-reply'});
   await h.advance(15000);
   assert.equal(h.effects.some(e => e.type === 'advanced'), false);
 });

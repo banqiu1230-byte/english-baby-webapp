@@ -7,7 +7,9 @@
   let introExampleText = null;
   let introExampleButton = null;
   let helpTrigger = null;
-  let helpSiblings = [];
+  let helpReading = false;
+  let helpRequest = null;
+  let helpRevision = 0;
   let serial = 0;
   let exposureSerial = 0;
   let storageNoticeShown = false;
@@ -16,9 +18,19 @@
   let storage;
   try { storage = window.localStorage; } catch { storage = null; }
   const store = LumaLearning.createStore(storage, { now: () => Date.now() });
+  const lifeStore = window.LumaLifeExperience?.createStore(storage, { now: () => Date.now() }) || null;
+  let lastReward = null;
+  if (lifeStore) {
+    const completed = store.getProfile().sessions.filter(item => item.scope === 'life-event' && item.completedAt);
+    lifeStore.migrate(completed);
+    // Repair a reload between the evidence receipt and its XP write.
+    for (const session of completed.sort((a, b) => a.completedAt.localeCompare(b.completedAt))) lifeStore.complete(session);
+  }
   const $ = id => document.getElementById(id);
   const write = (id, text) => { if ($(id)) $(id).textContent = text; };
+  const InterviewModule = typeof Interview === 'undefined' ? window.Interview : Interview;
   const TASKS = {
+    ...(InterviewModule?.learningDetails || {}),
     'breakfast-drink': ['choose-drink', '表达饮料选择', '她在问你想喝牛奶还是水。', 'Milk, please.', '我想要牛奶。也可以把 Milk 换成 Water。'],
     'breakfast-cup': ['offer-item', '回应物品请求', '她想请你把杯子给她。', 'Here you are.', '开口回应后，画面里的杯子会自动递过去。一个 Here 也可以。'],
     'breakfast-more': ['adjust-amount', '说明还要不要', '她在问你还要不要再来一点。', 'A little more, please.', '想再来一点可以这样说；够了可以说 Enough。'],
@@ -35,20 +47,23 @@
     'office-greeting': ['greet', '回应第一次见面', 'Maya 正在向你打招呼。', 'Nice to meet you, too.', '表示你也很高兴见到她。'],
   };
   const SCENES = {
+    interview: { title: '把你的设计经历，\n讲给面试官听', subtitle: '从自我介绍到作品集追问，练习真实的英文设计师面试', context: '职场 · 设计师面试', image: './assets/interview/room.png', label: 'UI/UX 设计师英文面试' },
     kitchen: { title: '今天，选一杯\n喜欢的饮料', subtitle: '从一个词开始，把意思说清楚', context: '家 · 清晨', image: './assets/optimized/breakfast-preview-860.jpg', label: '一起准备早餐' },
     coffee: { title: '下楼，点一杯\n喜欢的咖啡', subtitle: '从饮品到杯型，用自己的话点好这一杯', context: '日常 · 街角咖啡店', image: './assets/optimized/coffee-home-720.jpg', label: '下楼点杯咖啡' },
     airport: { title: '换个地方，\n把意思说清楚', subtitle: '从回应登机牌请求开始，试着和工作人员交流', context: '出行 · 机场', image: './assets/optimized/airport-preview-860.jpg', label: '在机场回应工作人员' },
     office: { title: '第一次见面，\n试着打个招呼', subtitle: '说明来意，认识一位新同事', context: '工作 · 初次见面', image: './assets/optimized/office-preview-860.jpg', label: '第一次拜访新同事' },
   };
-  const NEXT_SCENE = { kitchen: 'coffee', coffee: 'kitchen', airport: 'office', office: 'kitchen' };
-  const FIRST_TASK = { kitchen: 'breakfast-drink', coffee: 'coffee-order', airport: 'ticket', office: 'office-purpose' };
+  const NEXT_SCENE = { interview: 'interview', kitchen: 'coffee', coffee: 'kitchen', airport: 'office', office: 'kitchen' };
+  const FIRST_TASK = { interview: InterviewModule?.tasksFor('I01')[0]?.id, kitchen: 'breakfast-drink', coffee: 'coffee-order', airport: 'ticket', office: 'office-purpose' };
   const SCENE_TASKS = {
+    interview: (InterviewModule?.tasks || []).map(t => t.id),
     kitchen: ['breakfast-drink', 'breakfast-cup', 'breakfast-more'],
     coffee: ['coffee-order', 'coffee-size', 'coffee-service', 'coffee-thanks'],
     airport: ['ticket', 'bag', 'gate-a12'],
     office: ['office-purpose', 'office-signin', 'office-wait', 'office-greeting'],
   };
   const TRANSFER_TITLE = {
+    interview: '再练一轮，把设计思路说清楚',
     coffee: '去咖啡店，试着点一杯喜欢的饮品',
     airport: '去机场，试着回应登机牌请求',
     office: '见一位新同事，试着打招呼',
@@ -163,13 +178,15 @@
   function metadata(context = {}, taskId = context.taskId || task()?.id) {
     const current = task() || {};
     const state = s() || {};
-    const isCoffee = (context.sceneId || state.selectedScene) === 'coffee';
-    const missionId = isCoffee ? (context.missionId || current.missionId || state.coffeeMissionId || state.coffee?.missionId || null) : null;
+    const sceneId = context.sceneId || state.selectedScene;
+    const isCoffee = sceneId === 'coffee';
+    const missionId = isCoffee ? (context.missionId || current.missionId || state.coffeeMissionId || state.coffee?.missionId || null)
+      : sceneId === 'interview' ? (context.missionId || state.interviewMissionId || 'I01') : null;
     return {
       missionId,
       variantId: isCoffee ? (context.variantId || current.variantId || state.coffeeVariantId || state.coffee?.variantId || null) : null,
       challengeType: context.challengeType || state.encounterChallenge || current.challengeType || (isCoffee ? state.challengeType : null)
-        || (missionId === 'C04' ? 'independent' : missionId ? 'guided' : 'unknown'),
+        || (['C04', 'I07'].includes(missionId) ? 'independent' : missionId ? 'guided' : 'unknown'),
       promptModality: context.promptModality || (state.practiceMode === 'listening' || state.subtitlesHidden === true ? 'audio' : 'audio-text'),
       taskId,
     };
@@ -224,7 +241,9 @@
 
   function begin(resume = null) {
     const item = metadata(resume || {});
+    lastReward = null;
     sessionId = store.beginSession({ sceneId: s().selectedScene, mode: s().practiceMode, resumeId: resume?.sessionId,
+      scope: s().sessionScope === 'target-practice' ? 'target-practice' : 'life-event',
       missionId: item.missionId, variantId: item.variantId, challengeType: item.challengeType,
       promptModality: item.promptModality });
     if (introductoryExample === s().selectedScene) {
@@ -238,6 +257,19 @@
     // help into the next matching encounter, including after a page reload.
     const profile = store.getProfile();
     const today = new Date().toDateString();
+    for (const study of profile.studies || []) {
+      const elapsed = Date.now() - Date.parse(study.at);
+      if (study.sceneId !== s().selectedScene || elapsed < 0 || elapsed > 24 * 60 * 60 * 1000) continue;
+      if (profile.exposures.some(event => event.id.endsWith(`:study:${study.id}`)
+        && profile.attempts.some(attempt => attempt.outcome !== 'technical-error' && attempt.exposureIds.includes(event.id)))) continue;
+      const targetTask = (adapter.taskIds?.() || SCENE_TASKS[s().selectedScene] || []).find(id => details(id)[0] === study.targetId);
+      if (!targetTask) continue;
+      const revealsAnswer = ['keyword', 'full-example'].includes(study.kind);
+      const goal = s().sessionGoals[targetTask] ||= {};
+      goal.supportLevel = Math.max(goal.supportLevel || 0, study.kind === 'full-example' ? 3 : revealsAnswer ? 2 : 1);
+      noteExposure(study.kind, { id: `${sessionId}:study:${study.id}`, taskId: targetTask, targetId: study.targetId,
+        revealsTargetAnswer: revealsAnswer, relearning: true });
+    }
     for (const event of profile.exposures.filter(event => event.id.includes(':focus:') && !event.id.includes(':carry:')
       && new Date(event.at).toDateString() === today)) {
       if (profile.exposures.some(item => item.id.endsWith(`:carry:${event.id}`)
@@ -285,12 +317,12 @@
   }
 
   function checkpoint(nextIndex) {
-    if (!adapter || !sessionId || !s().sceneStarted || s().stage === 'complete' || s().sessionSaved) return;
+    if (!adapter || !sessionId || !s().sceneStarted || s().stage === 'complete' || s().sessionSaved || s().sessionScope === 'target-practice') return;
     const state = s();
-    if (['coffee', 'kitchen'].includes(state.selectedScene)) {
+    if (SCENES[state.selectedScene] && state.selectedScene !== 'interview') {
       store.saveCheckpoint({ sessionId, sceneId: state.selectedScene, taskIndex: 0,
         practiceMode: state.practiceMode,
-        missionId: state.selectedScene === 'coffee' ? (state.coffeeMissionId || state.coffee?.missionId) : null,
+        missionId: metadata().missionId,
         variantId: state.selectedScene === 'coffee' ? (state.coffeeVariantId || state.coffee?.variantId) : null });
       return;
     }
@@ -298,63 +330,83 @@
     store.saveCheckpoint({ sessionId, sceneId: state.selectedScene,
       taskIndex: Number.isInteger(nextIndex) ? nextIndex : state.taskIndex,
       practiceMode: state.practiceMode, breakfast: state.breakfast, coffee: state.coffee,
-      missionId: state.selectedScene === 'coffee' ? (state.coffeeMissionId || state.coffee?.missionId) : null,
+      missionId: metadata().missionId,
       variantId: state.selectedScene === 'coffee' ? (state.coffeeVariantId || state.coffee?.variantId) : null,
       coveredGoals: [...state.coveredGoals], goalRecords: state.sessionGoals });
   }
 
   function complete() {
-    if (!adapter || !sessionId) return;
-    store.completeSession({ id: sessionId, sceneId: s().selectedScene });
+    if (!adapter || !sessionId || s().stage !== 'complete') return null;
+    // Reaching the last prompt or leaving early is not completion of an interview.
+    if (s().selectedScene === 'interview' && s().sessionScope !== 'target-practice') {
+      const required = InterviewModule?.tasksFor(s().interviewMissionId) || [];
+      if (!required.length || !required.every(item => s().coveredGoals.has(item.id))) return null;
+    }
+    const receipt = store.completeSession({ id: sessionId, sceneId: s().selectedScene });
+    if (!receipt) return null;
+    if (receipt.scope === 'life-event' && lifeStore) {
+      const reward = lifeStore.complete(receipt);
+      if (!lastReward || lastReward.sessionId !== receipt.id) lastReward = reward;
+    } else lastReward = null;
     render();
+    return receipt;
   }
 
   function taskStarted() {
     closeHelp();
     const goal = adapter.goal();
     goal.supportLevel ??= 0;
-    const sceneLabels = { coffee: 'Mia · 街角咖啡店', kitchen: 'Luma · 家中早餐', airport: '工作人员 · 机场',
+    const sceneLabels = { interview: 'Alex · 设计师面试', coffee: 'Mia · 街角咖啡店', kitchen: 'Luma · 家中早餐', airport: '工作人员 · 机场',
       office: `${task().speaker || (task().id === 'office-greeting' ? 'Maya' : '前台')} · 初次拜访` };
     write('learningStageLabel', sceneLabels[s().selectedScene] || '生活里的英语对话');
     checkpoint();
   }
 
-  function homeStep() {
-    if (window.LumaWorldLoop) return window.LumaWorldLoop.plan(store.getProfile(), {
-      checkpoint: store.getCheckpoint(), completedMissions: adapter?.coffeeJourney?.()?.completed || [],
-    });
-    const next = store.nextStep();
-    const summary = store.summary();
-    const journey = adapter?.coffeeJourney?.();
-    if (next.kind !== 'resume' && journey?.nextMissionId) {
-      return {
-        ...next, kind: 'quest', sceneId: 'coffee', missionId: journey.nextMissionId,
-        missionTitle: journey.nextMissionTitle,
-      };
+  function homeStep(regionId = null) {
+    const profile = store.getProfile();
+    const places = window.LumaWorldCatalog?.places.filter(place => place.available && place.regionId === regionId) || [];
+    const eligible = sceneId => Boolean(SCENES[sceneId]) && (!places.length || places.some(place => place.id === sceneId));
+    const checkpoint = [...store.getCheckpoints()].reverse().find(item => eligible(item.sceneId));
+    const coffeeTitles = { C01: '推开门，给自己点一杯', C02: '朋友托你带一杯', C03: '拿到的咖啡，好像不太对', C04: '今天，想喝哪一杯？' };
+    if (checkpoint) return { ...checkpoint, kind: 'resume', taskIndex: checkpoint.sceneId === 'interview' ? checkpoint.taskIndex : 0,
+      title: checkpoint.sceneId === 'interview' ? InterviewModule?.getMission(checkpoint.missionId)?.title || SCENES.interview.label
+        : coffeeTitles[checkpoint.missionId] || SCENES[checkpoint.sceneId].label,
+      reason: checkpoint.sceneId === 'coffee' && checkpoint.missionId === 'C03'
+        ? '原本点了小杯拿铁带走。可以换杯，也可以留下这杯。'
+        : checkpoint.sceneId === 'interview' ? '已保存面试进度，继续当前话题。'
+        : '这件事已记住，从这次小事件的开头继续。', actionLabel: checkpoint.sceneId === 'interview' ? '继续面试练习' : '继续生活',
+    };
+    const completed = profile.sessions.filter(item => item.scope === 'life-event' && item.completedAt
+      && Date.parse(item.completedAt) <= Date.now() && eligible(item.sceneId))
+      .sort((a, b) => a.completedAt.localeCompare(b.completedAt));
+    const last = completed.at(-1);
+    if (last?.sceneId === 'interview' && InterviewModule) {
+      const done = new Set(completed.filter(item => item.sceneId === 'interview').map(item => item.missionId));
+      const mission = InterviewModule.missions.find(item => !done.has(item.id)) || InterviewModule.getMission('I07');
+      return { kind: 'quest', sceneId: 'interview', missionId: mission.id, practiceMode: 'guided',
+        title: mission.title, reason: mission.description, actionLabel: '开始面试练习' };
     }
-    if (next.kind === 'continue' && summary.sessionCount === 0) {
-      return {
-        ...next, kind: 'quest', sceneId: 'coffee', missionId: journey?.nextMissionId || 'C01',
-        missionTitle: journey?.nextMissionTitle || '第一次自己点咖啡',
-      };
-    }
-    if (next.kind === 'continue' && summary.completedSessions > 0) {
-      const completed = store.getProfile().sessions.filter(x => x.completedAt).sort((a, b) => a.completedAt.localeCompare(b.completedAt));
-      const last = completed.at(-1);
-      if (last?.sceneId === 'coffee' && journey?.nextMissionId) return {
-        ...next, kind: 'quest', sceneId: 'coffee', missionId: journey.nextMissionId, missionTitle: journey.nextMissionTitle,
-      };
-      return { ...next, kind: 'transfer', sceneId: NEXT_SCENE[last?.sceneId] || 'kitchen' };
-    }
-    return next;
+    const doneCoffee = new Set(completed.filter(item => item.sceneId === 'coffee').map(item => item.missionId));
+    const nextCoffee = Object.keys(coffeeTitles).find(id => !doneCoffee.has(id));
+    const suggestedScene = !last ? 'coffee' : last.sceneId === 'coffee' && nextCoffee ? 'coffee' : NEXT_SCENE[last.sceneId] || 'coffee';
+    const sceneId = eligible(suggestedScene) ? suggestedScene : (places.find(place => !completed.some(item => item.sceneId === place.id)) || places[0]).id;
+    const missionId = sceneId === 'coffee' ? nextCoffee || 'C01' : sceneId === 'interview' ? 'I01' : null;
+    return { kind: !last ? 'start' : sceneId === 'coffee' && nextCoffee ? 'quest' : 'return', sceneId,
+      missionId, practiceMode: missionId === 'C04' ? 'listening' : 'guided',
+      title: coffeeTitles[missionId] || (sceneId === 'interview' ? InterviewModule?.getMission(missionId)?.title : null) || SCENES[sceneId].label,
+      reason: sceneId === 'interview' ? InterviewModule?.getMission(missionId)?.description || SCENES.interview.subtitle
+        : !last && sceneId === 'coffee' ? '和 Mia 打个招呼，从一杯喜欢的咖啡开始。' : sceneId === 'coffee'
+        ? '按自己的想法点单，有需要随时求助。' : SCENES[sceneId].subtitle,
+      actionLabel: sceneId === 'interview' ? '开始面试练习' : !last ? '开始生活' : '继续生活',
+    };
   }
 
   function renderHome() {
     if (!adapter) return;
-    const next = homeStep(), summary = store.summary();
+    const next = homeStep(window.LumaWorldRegions?.currentRegion()), summary = store.summary();
     const scene = SCENES[next.sceneId] || SCENES.kitchen;
-    const checkpoint = next.kind === 'resume' ? store.getCheckpoint() : null;
-    const missionId = next.sceneId === 'coffee' ? (next.missionId || checkpoint?.missionId || null) : null;
+    const checkpoint = next.kind === 'resume' ? store.getCheckpoint({ sessionId: next.sessionId }) : null;
+    const missionId = next.missionId || checkpoint?.missionId || null;
     const coffeeCopy = {
       C01: ['推开门，给自己点一杯', '一杯喜欢的咖啡，堂食或带走。'],
       C02: ['朋友托你带一杯', '小杯拿铁，带走。'],
@@ -375,7 +427,7 @@
     write('todayTitle', title);
     write('todaySubtitle', subtitle);
     write('todayContext', scene.context);
-    const journeyTitle = next.sceneId === 'coffee' ? '街角的第一杯' : next.sceneId === 'airport' ? '出发的这一天' : next.sceneId === 'office' ? '第一次拜访' : '熟悉的早晨';
+    const journeyTitle = next.sceneId === 'interview' ? '设计师面试' : next.sceneId === 'coffee' ? '街角的第一杯' : next.sceneId === 'airport' ? '出发的这一天' : next.sceneId === 'office' ? '第一次拜访' : '熟悉的早晨';
     write('adventureJourneyTitle', journeyTitle);
     document.querySelector('.journey-switch')?.setAttribute('aria-label', `查看当前旅程：${journeyTitle}`);
     write('todayMissionCode', next.kind === 'resume' ? '上次的故事' : ['review', 'retry', 'return'].includes(next.kind) ? '再见熟悉的人' : '生活里的下一幕');
@@ -411,21 +463,22 @@
     const chooseMission = $('chooseCoffeeMission');
     if (chooseMission) {
       chooseMission.hidden = false;
-      chooseMission.setAttribute('aria-label', next.sceneId === 'coffee' ? '选择咖啡店任务' : '选择其他生活场景');
+      chooseMission.setAttribute('aria-label', next.sceneId === 'coffee' ? '选择咖啡店任务' : next.sceneId === 'interview' ? '选择面试练习' : '选择其他生活场景');
     }
     const label = document.querySelector('.live-label');
     if (label) { label.hidden = Boolean(chooseMission && !chooseMission.hidden); label.textContent = next.kind === 'resume' ? (next.sceneId === 'coffee' ? '任务已记住' : '进度已保存') : next.kind === 'review' ? '适合再试一次' : summary.todayCompletedSessions ? '新事件已出现' : '准备开始'; }
   }
 
-  function startHome({ chooseMission = false } = {}) {
-    const next = homeStep();
+  function startHome({ chooseMission = false, recommendation = null } = {}) {
+    const next = recommendation || homeStep(window.LumaWorldRegions?.currentRegion());
+    if (chooseMission && next.sceneId === 'interview') { previewScene('interview', next.missionId); return; }
     if (chooseMission && next.sceneId !== 'coffee') { adapter.chooseWorld?.(); return; }
-    const saved = next.kind === 'resume' ? store.getCheckpoint() : null;
+    const saved = next.kind === 'resume' ? store.getCheckpoint({ sessionId: next.sessionId }) : null;
     const missionId = next.sceneId === 'coffee' ? (next.missionId || saved?.missionId || null) : next.missionId;
     const choosingCoffeeMission = chooseMission && next.sceneId === 'coffee';
-    if (missionId) adapter.selectCoffeeMission?.(missionId);
+    if (next.sceneId === 'coffee' && missionId) adapter.selectCoffeeMission?.(missionId);
     const reviewTaskIndex = next.kind === 'review' && !choosingCoffeeMission
-      ? Math.max(0, (SCENE_TASKS[next.sceneId] || []).indexOf(next.taskId))
+      ? Math.max(0, (next.sceneId === 'interview' ? InterviewModule?.tasksFor(next.missionId).map(t => t.id) || [] : SCENE_TASKS[next.sceneId] || []).indexOf(next.taskId))
       : 0;
     adapter.start(next.sceneId || 'kitchen', {
       resumeCheckpoint: saved,
@@ -454,13 +507,13 @@
     if (!summary.completedSessions) { startHome(); return; }
     if (store.nextStep().kind === 'resume' || summary.dueCount) { startHome(); return; }
     const next = homeStep();
-    if (next.missionId) adapter.selectCoffeeMission?.(next.missionId);
+    if (next.sceneId === 'coffee' && next.missionId) adapter.selectCoffeeMission?.(next.missionId);
     adapter.start(next.sceneId || 'kitchen', { subtitlesHidden: false });
   }
 
   function startRecommendation(next = reviewPlan) {
     if (!next || !adapter) return;
-    if (next.kind === 'resume') { startHome(); return; }
+    if (next.kind === 'resume') { startHome({ recommendation: next }); return; }
     adapter.start(next.sceneId, {
       missionId: next.missionId, variantId: next.variantId,
       subtitlesHidden: next.practiceMode === 'listening', explicitMode: true,
@@ -483,23 +536,11 @@
     trigger?.click?.();
   }
 
-  function row(label, copy, icon = 'chat-circle', action = null) {
+  function row(label, copy, icon = 'chat-circle') {
     const article = document.createElement('article'); article.className = 'evidence-row';
     const i = document.createElement('i'); i.className = `ph ph-${icon}`; i.setAttribute('aria-hidden', 'true');
     const body = document.createElement('div'), title = document.createElement('strong'), text = document.createElement('p');
     title.textContent = label; text.textContent = copy; body.append(title, text); article.append(i, body);
-    if (action?.sceneId) {
-      article.className += ' learning-note-row';
-      const button = document.createElement('button');
-      button.type = 'button'; button.className = 'learning-note-action';
-      const buttonLabel = document.createElement('span'); buttonLabel.textContent = action.label || '再练一次';
-      button.append(buttonLabel);
-      button.dataset.learningScene = action.sceneId;
-      if (action.missionId) button.dataset.learningMission = action.missionId;
-      button.setAttribute('aria-label', `${action.label || '再练一次'}：${label}`);
-      button.addEventListener('click', () => previewScene(action.sceneId, action.missionId));
-      article.append(button);
-    }
     return article;
   }
 
@@ -525,8 +566,8 @@
     // action. An unrelated saved scene must not divert today's review.
     const next = store.nextStep({ preferReview: true });
     if (next.kind === 'review') {
-      const taskIndex = Math.max(0, (SCENE_TASKS[next.sceneId] || []).indexOf(next.taskId));
-      if (next.missionId) adapter.selectCoffeeMission?.(next.missionId);
+      const taskIndex = Math.max(0, (next.sceneId === 'interview' ? InterviewModule?.tasksFor(next.missionId).map(t => t.id) || [] : SCENE_TASKS[next.sceneId] || []).indexOf(next.taskId));
+      if (next.sceneId === 'coffee' && next.missionId) adapter.selectCoffeeMission?.(next.missionId);
       adapter.start(next.sceneId || 'kitchen', {
         subtitlesHidden: false,
         explicitMode: true, encounterChallenge: 'retention',
@@ -540,27 +581,19 @@
       });
       return;
     }
-    if (next.kind === 'resume' || adapter?.coffeeJourney?.()?.nextMissionId) {
-      startHome();
-      return;
-    }
-    if (next.kind === 'continue' && next.sceneId) {
-      adapter.start(next.sceneId, { subtitlesHidden: false, practiceMode: 'guided' });
-      return;
-    }
-    startHome();
+    // The learning tab stays a study space even when no review is due.
+    // Browsing expressions must not start a life event or open the microphone.
+    $('sceneDictionary')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   }
 
   function renderLearningNotes(notes) {
-    const { totals, profile, due, upcoming, strengthen } = notes;
+    const { totals, profile, due, upcoming } = notes;
     const completed = profile.sessions.filter(session => session.completedAt);
     const successful = profile.attempts.filter(attempt => attempt.outcome === 'success');
-    write('learningNotesTitle', '学习笔记');
-    write('growthSummary', due.length ? `${due.length} 项今天适合复习` : completed.length ? '把用过的英语，再用一次。' : '从一件生活小事开始。');
-    const next = due.length ? store.nextStep({ preferReview: true }) : homeStep();
-    const sceneId = next.sceneId || 'coffee';
+    const next = due.length ? store.nextStep({ preferReview: true }) : null;
+    const sceneId = next?.sceneId || upcoming[0]?.sceneId || 'coffee';
     const scene = SCENES[sceneId] || SCENES.coffee;
-    const reviewTarget = due.find(item => (next.targetIds || []).includes(item.targetId)) || due[0];
+    const reviewTarget = due.find(item => (next?.targetIds || []).includes(item.targetId)) || due[0];
     const taskTitles = {
       'choose-drink': sceneId === 'coffee' ? '再点一杯喜欢的咖啡' : '再选一杯喜欢的饮料',
       'choose-size': '说清楚想要的杯型', 'choose-service': '告诉店员堂食还是带走',
@@ -570,40 +603,17 @@
       'give-name': '介绍一下自己的名字', 'receive-information': '听懂对方的安排',
       greet: '和新认识的人打个招呼',
     };
-    write('notesReviewEyebrow', due.length ? '今天再用一次' : completed.length ? '下一件生活小事' : '从一件小事开始');
+    write('notesReviewEyebrow', due.length ? '今天再用一次' : '按自己的节奏来');
     write('notesReviewCount', due.length ? `${due.length} 项待复习` : '');
     if ($('notesReviewCount')) $('notesReviewCount').hidden = !due.length;
-    write('notesReviewScene', scene.context);
+    write('notesReviewScene', due.length ? scene.context : '情景词典');
     if ($('notesReviewImage')) $('notesReviewImage').src = scene.image;
-    write('reviewOverviewTitle', due.length ? (taskTitles[reviewTarget?.targetId] || targetLabel(reviewTarget?.targetId)) : next.title || scene.title.replace('\n', ''));
+    write('reviewOverviewTitle', due.length ? (taskTitles[reviewTarget?.targetId] || targetLabel(reviewTarget?.targetId)) : '今天没有待复习');
     write('reviewOverviewCopy', due.length ? '隔了一段时间，再试着自己说。需要时仍可打开提示。'
-      : next.kind === 'resume' ? '从这件小事的开头继续，按自己的节奏来。'
-      : upcoming.length ? `下一次复习在 ${shortDate(upcoming[0].dueAt)}。现在也可以先继续生活。`
-      : completed.length ? '在熟悉的生活里，再开口说一次。' : '和对方打声招呼，从一句简单的英语开始。');
-    const journey = adapter?.coffeeJourney?.();
-    const reviewAction = due.length ? '开始复习'
-      : store.getCheckpoint() ? '继续上次练习'
-      : journey?.nextMissionId ? (journey.completed?.length ? '继续当前旅程' : '开始当前旅程')
-      : completed.length ? '再练最近场景' : '开始第一段练习';
-    setButtonLabel('startReview', reviewAction);
-    if ($('reviewQueueList')) {
-      const remaining = due.filter(item => item !== reviewTarget);
-      const more = document.createElement('p'); more.className = 'review-queue-more';
-      more.textContent = remaining.length ? `还可以复习：${remaining.slice(0, 2).map(item => targetLabel(item.targetId)).join('、')}${remaining.length > 2 ? `等 ${remaining.length} 项` : ''}` : '';
-      $('reviewQueueList').replaceChildren(...(remaining.length ? [more] : []));
-    }
-    if ($('notesPracticeFold')) $('notesPracticeFold').hidden = !strengthen.length;
+      : upcoming.length ? `下一次复习在 ${shortDate(upcoming[0].dueAt)}。先看看情景词典里的生活表达。`
+      : '可以先看看情景词典，认识生活中用得上的表达。');
+    setButtonLabel('startReview', due.length ? '开始复习' : '看看情景词典');
     write('notesHistorySummary', completed.length ? `已完成 ${completed.length} 次练习 · 查看记录` : '每一次开口，都留在这里');
-    write('strengthCount', `${strengthen.length} 项`);
-    if ($('strengthList')) {
-      const strengthRows = strengthen.length ? strengthen.map(item => row(
-          targetLabel(item.targetId),
-          `${sceneLabel(item.sceneId)} · ${item.reason}`,
-          item.reason.includes('未确认') ? 'question' : 'plant',
-          { label: '再练一次', sceneId: item.sceneId, missionId: item.missionId },
-        )) : [row('目前没有需要加强的记录', '技术中断不会算作你的弱项；有真实练习后再继续整理。', 'check-circle')];
-      $('strengthList').replaceChildren(...strengthRows);
-    }
 
     write('achievementCompleted', String(new Set(completed.map(session => session.sceneId)).size));
     write('achievementIndependent', String(totals.independentProductionCount));
@@ -621,7 +631,7 @@
     const { totals, profile } = notes;
     const successful = profile.attempts.filter(a => a.outcome === 'success');
     renderLearningNotes(notes);
-    renderWorldEvidence(profile);
+    renderEvidenceHistory(profile);
     if ($('evidenceList')) {
       $('evidenceList').replaceChildren();
       const grouped = new Map();
@@ -643,7 +653,7 @@
         const assistedCount = sessionAttempts.filter(attempt => attempt.productionCondition === 'assisted').length;
         const missionTitle = session.sceneId === 'coffee' && session.missionId
           ? ({ C01: '第一次自己点咖啡', C02: '替朋友点对那一杯', C03: '把错单修正回来', C04: '独立完成一张新订单' }[session.missionId])
-          : null;
+          : session.sceneId === 'interview' ? InterviewModule?.getMission(session.missionId)?.title : null;
         const evidence = independentCount ? ` · ${independentCount} 次独立表达`
           : assistedCount ? ` · ${assistedCount} 次借助帮助`
           : '';
@@ -653,14 +663,14 @@
     }
     write('profileLearningCopy', totals.sessionCount ? `已开始 ${totals.sessionCount} 次练习，完成 ${totals.completedSessions} 段。按自己的节奏继续。` : '还没有练习记录。完成第一段生活场景，就从这里开始。');
     if (!totals.storageAvailable && !storageNoticeShown) { storageNoticeShown = true; adapter.notify('当前浏览器无法保存进度。这次仍能练习，关闭后可能无法恢复。', 5000); }
+    window.LumaNavigation?.render({ profile, totals, life: lifeStore?.summary() || null, next: homeStep() });
   }
 
   function renderReview() {
     const sessionAttempts = store.getProfile().attempts.filter(a => a.sessionId === sessionId);
     const attempts = sessionAttempts.filter(a => a.outcome === 'success');
     const voice = attempts.filter(englishVoice), free = voice.filter(independent);
-    write('reviewSceneMeta', `${SCENES[s().selectedScene]?.label || '场景练习'} · 这一段完成了`);
-    write('reviewHeard', `${s().coveredGoals.size} 个生活步骤`);
+    write('reviewHeard', `${s().coveredGoals.size} 个${s().selectedScene === 'interview' ? '面试话题' : '生活步骤'}`);
     write('reviewActions', `${free.length} 次未看答案`);
     write('reviewSpoken', `${voice.length} 次英语开口`);
     if ($('reviewEvidenceList')) { $('reviewEvidenceList').replaceChildren(row(free.length ? `${free.length} 次，没有看答案也表达了意思` : '这次的合作已经完成', free.length ? '下次换个人或物品再试，看看能否继续独立表达。' : voice.length ? '这次借助了帮助。下一次试着少看一点提示。' : '这次还没有留下英语语音证据；下一次可以从一个英语词开始。', 'plant')); }
@@ -757,54 +767,8 @@
     return card;
   }
 
-  function renderWorldEvidence(profile) {
-    const container = $('worldEvidenceList');
-    if (!container) return;
-    const byTarget = new Map();
+  function renderEvidenceHistory(profile) {
     const attempts = profile.attempts.filter(a => a.outcome !== 'technical-error' && Date.parse(a.at) <= Date.now()).sort(byEvidenceTime);
-    for (const item of attempts) {
-      if (!byTarget.has(item.targetId)) byTarget.set(item.targetId, []);
-      byTarget.get(item.targetId).push(item);
-    }
-    const changes = [];
-    for (const [targetId, records] of byTarget) {
-      const latest = records.at(-1);
-      const previous = [...records].reverse().find(item => item.sessionId !== latest.sessionId && item.outcome === 'success');
-      if (!englishVoice(latest) || !independent(latest) || !previous) continue;
-      let before = '', after = '', note = '';
-      if (previous.productionCondition === 'assisted') {
-        before = '需要表达提示'; after = '没看答案，也说出来了';
-        note = '这次少用了一点帮助。';
-      } else if (englishVoice(previous) && independent(previous) && previous.listeningCondition === 'assisted' && latest.listeningCondition === 'independent') {
-        before = '借助字幕或听力帮助'; after = '只听声音，也回应了';
-        note = '这次听懂后，自己接上了话。';
-      } else if (englishVoice(previous) && independent(previous) && previous.sceneId !== latest.sceneId) {
-        before = sceneLabel(previous.sceneId); after = sceneLabel(latest.sceneId);
-        note = '换了个地方，也独立表达了一次。';
-      }
-      if (note) changes.push({ targetId, latest, previous, before, after, note });
-    }
-    changes.sort((a, b) => byEvidenceTime(b.latest, a.latest));
-    const takeaway = latestTakeaway(attempts);
-    const change = takeaway ? changes.find(item => item.latest.id === takeaway.id) : changes[0];
-    if ($('worldEvidenceSection')) $('worldEvidenceSection').hidden = !change && !takeaway;
-    write('worldEvidenceTitle', takeaway ? '这句英语，你用上了' : '一个小进步');
-    container.replaceChildren();
-    const quoteCard = takeaway ? takeawayCard(takeaway) : null;
-    if (quoteCard) container.append(quoteCard);
-    if (change) {
-      const card = quoteCard || document.createElement('article'); card.className = quoteCard ? card.className : 'world-evidence-card';
-      const title = document.createElement('h3'); title.textContent = targetLabel(change.targetId);
-      const comparison = document.createElement('div'); comparison.className = 'notes-progress-comparison';
-      for (const [label, text, item] of [['上次', change.before, change.previous], ['这次', change.after, change.latest]]) {
-        const line = document.createElement('div'), meta = document.createElement('small'), value = document.createElement('span');
-        meta.textContent = `${label} · ${shortDate(item.at)}`; value.textContent = text; line.append(meta, value); comparison.append(line);
-      }
-      const note = document.createElement('p'); note.className = 'world-evidence-note'; note.textContent = change.note;
-      if (!quoteCard) card.append(title);
-      card.append(comparison, note);
-      if (!quoteCard) container.append(card);
-    }
     const history = $('notesEvidenceList');
     if (history) {
       const recent = [...attempts].reverse().slice(0, 12);
@@ -821,13 +785,131 @@
       kind, revealsTargetAnswer: true, affectsProduction: true, affectsListening: false, relearning: true });
   }
 
+  function recordStudy(sceneId, taskId, kind = 'full-example') {
+    if (!SCENE_TASKS[sceneId]?.includes(taskId) || !['keyword', 'full-example', 'meaning', 'replay'].includes(kind)) return null;
+    const event = store.recordStudy({ sceneId, taskId, targetId: details(taskId)[0], kind });
+    render();
+    return event;
+  }
+
+  function syncHelpVisibility() {
+    const visible = isHelpVisible();
+    for (const id of ['helpButton', 'taskHelpToggle']) $(id)?.setAttribute('aria-expanded', String(visible));
+    const hud = $('sceneTaskHud');
+    if (hud && s()?.sceneStarted) hud.hidden = !visible && !['coffee', 'interview'].includes(s().selectedScene);
+  }
+
+  function isHelpVisible() { return Boolean($('learningHelpPanel') && !$('learningHelpPanel').hidden); }
+
   function closeHelp() {
-    const panel = $('learningHelpPanel');
-    const wasOpen = Boolean(panel && !panel.hidden);
-    if (panel) panel.hidden = true;
-    for (const [element, wasInert] of helpSiblings) element.inert = wasInert;
-    helpSiblings = [];
-    if (wasOpen) adapter?.resumeGuidance?.();
+    helpRequest?.abort(); helpRequest = null; helpRevision++;
+    const wasReading = helpReading;
+    helpReading = false;
+    if ($('learningHelpPanel')) $('learningHelpPanel').hidden = true;
+    syncHelpVisibility();
+    if (wasReading) adapter?.resumeGuidance?.();
+  }
+
+  // Reading pauses nudges; speaking releases the pause while the sentence stays in view.
+  function learnerTurnStarted() {
+    if (!helpReading) return;
+    helpReading = false;
+    adapter?.resumeGuidance?.();
+  }
+
+  function questionChanged() { closeHelp(); }
+
+  function toggleHelp() {
+    if (isHelpVisible()) closeHelp(); else openHelp();
+  }
+
+  function helpContext() {
+    const current = task();
+    const question = s().activeQuestion || current.prompt;
+    const authored = adapter.isTaskQuestion ? adapter.isTaskQuestion(question) : question === current.prompt;
+    return { question, authored, support: adapter.support?.() || current.support };
+  }
+
+  function renderAnswerScaffold(support, { loading = false, failed = false, showExample = false } = {}) {
+    const content = $('learningHelpContent'); content.replaceChildren();
+    const scroll = $('learningHelpPanel').querySelector('.learning-help-scroll');
+    if (scroll) scroll.scrollTop = 0;
+    const paragraph = (text, className) => {
+      const element = document.createElement('p'); element.className = className; element.textContent = text; return element;
+    };
+    const question = s().activeQuestion || task().prompt;
+    if (loading || failed) {
+      content.append(paragraph(question, 'help-current-question'));
+      const status = paragraph(loading ? '正在梳理这句追问，先不用急着回答。' : '这句追问的提示暂时没接上，可以先用中文说想法。', 'help-request-status');
+      status.setAttribute('role', 'status'); content.append(status);
+    } else {
+      noteHelp(1, 'meaning');
+    }
+    content.append(paragraph('先说一句', 'help-section-label'));
+    const starter = paragraph(support.answerStarter, 'help-answer-starter'); starter.id = 'helpAnswerStarter';
+    content.append(starter);
+    if (!loading && !failed) content.append(paragraph(support.meaning, 'help-question-meaning'));
+    noteHelp(2, 'keyword');
+    if (support.answerPlan?.length) {
+      const plan = document.createElement('ol'); plan.className = 'help-answer-plan';
+      for (const point of support.answerPlan) {
+        const item = document.createElement('li'); item.textContent = point; plan.append(item);
+      }
+      const details = document.createElement('details'); details.dataset.helpPlan = '';
+      const summary = document.createElement('summary'); summary.textContent = '展开回答思路';
+      details.append(summary, plan); content.append(details);
+    }
+    content.append(paragraph('把 [ ] 换成你的真实经历，也可以先说中文想法。', 'help-answer-note'));
+    if (support.model) {
+      const reveal = document.createElement('button'); reveal.type = 'button'; reveal.dataset.helpExample = '';
+      reveal.className = 'help-example-toggle'; reveal.textContent = '展开完整示例'; reveal.setAttribute('aria-expanded', 'false');
+      reveal.setAttribute('aria-controls', 'helpAnswerExample');
+      const example = document.createElement('div'); example.id = 'helpAnswerExample'; example.hidden = true;
+      reveal.addEventListener('click', () => {
+        example.hidden = !example.hidden; reveal.setAttribute('aria-expanded', String(!example.hidden));
+        reveal.textContent = example.hidden ? '展开完整示例' : '收起完整示例';
+        if (!example.hidden) {
+          noteHelp(3, 'example');
+          example.replaceChildren(paragraph(support.model, 'help-model-text'), paragraph(support.note || '方括号换成你的真实信息，不用照着全部说。', 'help-answer-note'));
+          const play = document.createElement('button'); play.type = 'button'; play.className = 'help-example-play'; play.textContent = '听一遍示例';
+          play.addEventListener('click', () => adapter.speak(support.model, { prompt: false })); example.append(play);
+        }
+      });
+      content.append(reveal, example);
+      if (showExample) {
+        reveal.click();
+        if (scroll) scroll.scrollTop += example.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+      }
+    }
+    if (failed) {
+      const retry = document.createElement('button'); retry.type = 'button'; retry.dataset.helpRetry = '';
+      retry.textContent = '重新获取这句提示'; retry.addEventListener('click', () => openHelp()); content.append(retry);
+    }
+  }
+
+  async function loadConversationScaffold(context, { showExample = false } = {}) {
+    const revision = helpRevision, session = s().practiceSession, taskId = task().id;
+    const controller = new AbortController(); helpRequest = controller;
+    const fallback = { answerStarter: 'Let me think for a moment.', answerPlan: ['先想你最想表达的一点', '用中文或熟悉的英文词说出来'] };
+    renderAnswerScaffold(fallback, { loading: true });
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const current = () => revision === helpRevision && !$('learningHelpPanel').hidden
+      && s().sceneStarted && s().practiceSession === session && task().id === taskId
+      && (s().activeQuestion || task().prompt) === context.question;
+    try {
+      const history = (s().dialogueHistory || []).filter(message => message.speaker === 'luma' || message.final)
+        .slice(-12).map(message => ({ role: message.speaker === 'user' ? 'user' : 'assistant', text: String(message.text || '').slice(0, 1200) }));
+      const response = await fetch('/api/conversation-help', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sceneId: s().selectedScene, taskId, question: context.question.slice(0, 1200), history }), signal: controller.signal });
+      if (!response.ok) throw new Error('help-unavailable');
+      const support = await response.json();
+      if (!support.meaning || !support.answerStarter || !Array.isArray(support.answerPlan)) throw new Error('help-unavailable');
+      if (current()) renderAnswerScaffold(support, { showExample });
+    } catch {
+      if (current()) renderAnswerScaffold(fallback, { failed: true });
+    } finally {
+      clearTimeout(timeout); if (helpRequest === controller) helpRequest = null;
+    }
   }
 
   function resetIntroduction() {
@@ -844,25 +926,43 @@
 
   function openHelp(kind = 'menu') {
     if (!adapter || !s().sceneStarted) return;
-    adapter.pauseGuidance?.();
     const panel = $('learningHelpPanel'); if (!panel) return;
-    if (panel.hidden) {
-      helpTrigger = document.activeElement;
-      helpSiblings = [...panel.parentElement.children].filter(element => element !== panel).map(element => [element, element.inert]);
-      for (const [element] of helpSiblings) element.inert = true;
-    }
+    if (panel.hidden) helpTrigger = document.activeElement;
+    helpReading = true;
+    adapter.pauseGuidance?.();
     panel.hidden = false;
+    syncHelpVisibility();
+    helpRequest?.abort(); helpRequest = null; helpRevision++;
+    const scroll = panel.querySelector('.learning-help-scroll'); if (scroll) scroll.scrollTop = 0;
+    const context = helpContext();
+    const scaffold = (['menu', 'keyword', 'example'].includes(kind) && context.support?.responseMode === 'structured')
+      || (!context.authored && ['menu', 'meaning', 'keyword', 'example'].includes(kind));
+    panel.dataset.mode = scaffold ? 'scaffold' : 'menu';
+    const topic = task().progressLabel || task().label || details(task().id)[1];
+    write('learningHelpTitle', `${topic} · ${context.authored ? '开口提示' : '当前追问'}`);
+    const activeKind = kind === 'menu' ? 'keyword' : kind;
+    for (const button of panel.querySelectorAll('.learning-help-options button')) {
+      button.setAttribute('aria-pressed', String(button.dataset.learningHelp === activeKind));
+    }
+    if (scaffold) {
+      if (context.authored) renderAnswerScaffold(context.support, { showExample: kind === 'example' });
+      else loadConversationScaffold(context, { showExample: kind === 'example' });
+      return;
+    }
     const content = $('learningHelpContent'); content.replaceChildren();
     const item = contextualDetails(task().id);
     if (kind === 'meaning') { noteHelp(1, 'meaning'); content.append(row('先弄懂对方的意思', item[2], 'ear')); }
-    else if (kind === 'keyword') {
+    else if (['menu', 'keyword'].includes(kind)) {
       const words = {
         'choose-drink': s().selectedScene === 'coffee' ? 'latte · 拿铁 / americano · 美式' : 'milk · 牛奶 / water · 水',
         'choose-size': 'small · 小杯 / large · 大杯', 'choose-service': 'for here · 堂食 / to go · 带走',
         'thank-person': 'thank · 感谢', 'offer-item': 'here · 给你', 'adjust-amount': 'more · 再来 / enough · 够了',
         'confirm-belonging': 'mine · 我的', 'find-location': 'A12 · 登机口', 'give-name': 'my name · 我的名字',
       };
-      noteHelp(2, 'keyword'); content.append(row('先用一个词试试', words[item[0]] || item[3].split(' ').slice(0, 2).join(' '), 'key'));
+      const interviewTask = s().selectedScene === 'interview' ? InterviewModule?.taskById(task().id) : null;
+      const keywords = interviewTask?.keywords;
+      noteHelp(2, 'keyword'); content.append(row(interviewTask ? '先抓住表达重点' : '先用一个词试试',
+        (Array.isArray(keywords) ? keywords.join(' · ') : keywords) || words[item[0]] || item[3].split(' ').slice(0, 2).join(' '), 'key'));
     }
     else if (kind === 'example') {
       noteHelp(3, 'example'); content.append(row(item[3], item[4], 'chat-circle'));
@@ -870,14 +970,13 @@
         adapter.notify?.('已使用示范；这次仍可完成，复盘会如实记为借助帮助。', 4200);
       const play = document.createElement('button'); play.type = 'button'; play.className = 'help-example-play'; play.textContent = '听一遍示范';
       play.addEventListener('click', () => adapter.speak(item[3], { prompt: false })); content.append(play);
-      const tip = document.createElement('p'); tip.textContent = '看过后先收起帮助，再换成自己的意思说一遍。'; content.append(tip);
     } else if (kind === 'replay') { noteHelp(1, 'replay'); adapter.speak(s().activeQuestion || task().prompt); content.append(row('再听一遍', '先听关键意思，不需要每个词都懂。', 'speaker-high')); }
     else content.append(row('卡住也没关系', '选择需要的帮助，之后继续刚才的小事。', 'leaf'));
-    if (kind === 'menu') panel.querySelector('.learning-help-sheet button')?.focus({ preventScroll: true });
   }
 
   function bind(value) {
     adapter = value;
+    $('taskHelpToggle')?.addEventListener('click', toggleHelp);
     $('startReview')?.addEventListener('click', startReviewPractice);
     $('worldAlternative')?.addEventListener('click', () => startRecommendation(reviewPlan?.alternative));
     $('worldFocus')?.addEventListener('toggle', () => { if ($('worldFocus').open) noteFocusStudy('keyword'); });
@@ -897,12 +996,6 @@
     }));
     $('learningHelpPanel')?.addEventListener('keydown', event => {
       if (event.key === 'Escape') { closeHelp(); helpTrigger?.focus({ preventScroll: true }); }
-      if (event.key === 'Tab') {
-        const buttons = [...$('learningHelpPanel').querySelectorAll('.learning-help-sheet button')];
-        const first = buttons[0], last = buttons.at(-1);
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-      }
     });
     const guidance = document.querySelector('.intro-guidance');
     if (guidance) {
@@ -922,5 +1015,9 @@
     render();
   }
 
-  window.LumaExperience = { resetIntroduction, noteCharacterLine, currentSession: () => sessionId, bind, store, begin, supportLevel, noteExposure, noteHelp, noteAnswer, noteAction, checkpoint, complete, taskStarted, render, renderHome, renderReview, startHome, startReviewPractice, startTransfer, startRecommendation, closeHelp, openHelp };
+  window.LumaExperience = { resetIntroduction, noteCharacterLine, currentSession: () => sessionId, bind, store, lifeStore,
+    currentReward: () => lastReward, homeStep, previewScene, recordStudy,
+    isHelpOpen: () => helpReading, isHelpVisible, learnerTurnStarted, toggleHelp,
+    catalog: { TASKS, SCENE_TASKS, SCENES }, TASKS, SCENE_TASKS, SCENES,
+    begin, supportLevel, noteExposure, noteHelp, noteAnswer, noteAction, checkpoint, complete, taskStarted, render, renderHome, renderReview, startHome, startReviewPractice, startTransfer, startRecommendation, closeHelp, openHelp, questionChanged };
 })();

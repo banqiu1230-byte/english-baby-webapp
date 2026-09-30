@@ -457,6 +457,7 @@ test('starting another scene preserves both checkpoints and completing one clear
   assert.equal(restored.getCheckpoint().sessionId, second);
   assert.equal(restored.getCheckpoint({ sceneId: 'kitchen' }).sessionId, f.sessionId);
   assert.equal(restored.getCheckpoint({ sceneId: 'airport' }).sessionId, second);
+  assert.equal(restored.getCheckpoint({ sceneId: 'airport' }).taskIndex, 0);
   assert.equal(restored.getCheckpoint({ missionId: 'airport-departure' }).sessionId, second);
   assert.equal(restored.getCheckpoints().length, 2);
   restored.completeSession({ id: f.sessionId, sceneId: 'kitchen' });
@@ -465,6 +466,56 @@ test('starting another scene preserves both checkpoints and completing one clear
   assert.equal(restored.getCheckpoints().length, 1);
   assert.equal(restored.saveCheckpoint({ sessionId: second, sceneId: 'kitchen', taskIndex: 0 }), null);
   assert.equal(restored.saveCheckpoint({ sessionId: second, sceneId: 'airport', taskIndex: -1 }), null);
+});
+
+test('all implemented life events restart at their beginning and replace only the same unfinished event', () => {
+  const store = Learning.createStore(memoryStorage());
+  const c02 = store.beginSession({ sceneId: 'coffee', missionId: 'C02', scope: 'life-event' });
+  store.saveCheckpoint({ sessionId: c02, sceneId: 'coffee', taskIndex: 2 });
+  for (const sceneId of ['airport', 'office', 'kitchen']) {
+    const first = store.beginSession({ sceneId, scope: 'life-event' });
+    store.saveCheckpoint({ sessionId: first, sceneId, taskIndex: 2, coveredGoals: ['some-internal-node'] });
+    assert.equal(store.getCheckpoint({ sceneId }).taskIndex, 0);
+    assert.equal(store.getCheckpoint({ sceneId }).coveredGoals, undefined);
+    const replacement = store.beginSession({ sceneId, scope: 'life-event' });
+    assert.ok(store.getProfile().sessions.find(item => item.id === first).supersededAt);
+    assert.equal(store.completeSession({ id: first, sceneId }), null);
+    assert.equal(store.getCheckpoint({ sceneId }), null);
+    store.saveCheckpoint({ sessionId: replacement, sceneId, taskIndex: 0 });
+    store.completeSession({ id: replacement, sceneId });
+    assert.equal(store.getCheckpoint({ sceneId }), null);
+  }
+  assert.equal(store.getCheckpoint().sessionId, c02);
+  const c03 = store.beginSession({ sceneId: 'coffee', missionId: 'C03', scope: 'life-event' });
+  store.saveCheckpoint({ sessionId: c03, sceneId: 'coffee', taskIndex: 0 });
+  assert.equal(store.getCheckpoint({ missionId: 'C02' }).sessionId, c02);
+});
+
+test('short practice cannot replace or save a life-event checkpoint and scope survives reload', () => {
+  const storage = memoryStorage();
+  const store = Learning.createStore(storage);
+  const full = store.beginSession({ sceneId: 'coffee', missionId: 'C01', scope: 'life-event' });
+  store.saveCheckpoint({ sessionId: full, sceneId: 'coffee', taskIndex: 1 });
+  const practice = store.beginSession({ sceneId: 'coffee', missionId: 'C01', scope: 'target-practice' });
+  assert.equal(store.saveCheckpoint({ sessionId: practice, sceneId: 'coffee', taskIndex: 3 }), null);
+  store.completeSession({ id: practice, sceneId: 'coffee' });
+  const reloaded = Learning.createStore(storage);
+  assert.equal(reloaded.getCheckpoint().sessionId, full);
+  assert.equal(reloaded.getProfile().sessions.find(item => item.id === practice).scope, 'target-practice');
+  assert.equal(reloaded.getProfile().sessions.find(item => item.id === full).supersededAt, null);
+});
+
+test('dictionary study survives reload without being a session or successful answer', () => {
+  const storage = memoryStorage();
+  const store = Learning.createStore(storage);
+  assert.equal(store.recordStudy({ sceneId: 'coffee', taskId: 'coffee-order', targetId: 'choose-drink', kind: 'invalid' }), null);
+  const study = store.recordStudy({ sceneId: 'coffee', taskId: 'coffee-order', targetId: 'choose-drink', kind: 'full-example' });
+  assert.ok(study.id);
+  assert.equal(store.summary().sessionCount, 0);
+  assert.equal(store.getProfile().attempts.length, 0);
+  const reloaded = Learning.createStore(storage);
+  assert.equal(reloaded.getProfile().studies[0].id, study.id);
+  assert.equal(reloaded.summary().sessionCount, 0);
 });
 
 test('legacy single checkpoints migrate and explicit review bypasses an unrelated saved scene', () => {

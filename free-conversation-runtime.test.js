@@ -36,7 +36,7 @@ function sceneHarness(fixture) {
     },
     speak: text => { h.effects.push({ type: 'spoken', text }); return Promise.resolve(true); },
     showReview: () => { h.effects.push({ type: 'review' }); h.s.sceneStarted = false; },
-    syncCoffeeMissionHud() {},
+    syncSceneTaskHud() {},
     fetch: async () => {
       h.effects.push({ type: 'feedback-request' });
       return { ok: true, json: async () => ({ meaning_valid: false }) };
@@ -61,7 +61,7 @@ function sceneHarness(fixture) {
   };
   h.c.isBreakfastScene = () => h.s.selectedScene === 'kitchen';
   h.load('latestFollowupText', 'clearTaskAdvance', 'scheduleTaskAdvance',
-    'clearReviewTransition', 'scheduleReview', 'transitionReplyReplacement',
+    'clearReviewTransition', 'scheduleReview',
     'applyDynamicFeedback', 'requestLanguageFeedback', 'fallbackMeaningFeedback',
     'taskProgress', 'taskHasAction', 'syncSceneProgress');
   const breakfastCommit = breakfastSource.match(/^function commitBreakfastChoice\([^]*?^\}/m);
@@ -92,23 +92,22 @@ for (const fixture of sceneCases) {
     h.s.coveredGoals.add(h.task.id);
     h.c.scheduleTaskAdvance(1);
     finalTranscript(h, 'How is your day?');
-    assert.equal(h.s.conversationFocus, 'chat');
-    assert.equal(h.s.advanceTimer, null);
-    assert.equal(h.c.transitionReplyReplacement('Good, thanks! How about you?'), '',
-      'the real social reply must not become a canned task acknowledgment');
-    h.c.stopSpeechPlayback(); // Simulate the end of the social reply.
+    assert.equal(h.s.conversationFocus, 'task');
+    h.c.showUnplayedCharacterLine('Good, thanks! How about you?');
+    h.c.settleFailedDuplexTurn(); // The real follow-up, even without audio, keeps the learner floor.
     await h.advance(16000);
     assert.equal(h.effects.some(effect => effect.type === 'advanced'), false);
     assert.equal(h.effects.some(effect => effect.type === 'review'), false);
     assert.equal(h.effects.some(effect => effect.type === 'evidence'), false);
-    assert.equal(h.s.dialogueHistory.at(-1).text, 'How is your day?');
+    assert.equal(h.s.dialogueHistory.findLast(message => message.speaker === 'user').text, 'How is your day?');
   });
 
-  test(`${fixture.scene}: an explicitly requested continuation resumes a paused transition`, () => {
+  test(`${fixture.scene}: an explicitly requested continuation resumes a paused transition`, async () => {
     const h = sceneHarness(fixture);
     h.s.stage = 'task-complete'; h.s.speechDone = true;
     h.s.coveredGoals.add(h.task.id); h.s.conversationFocus = 'chat';
     finalTranscript(h, 'Continue, please.');
+    await h.advance(3000);
     assert.equal(h.s.stage, 'active');
     assert.equal(h.s.taskIndex, 1);
     assert.equal(h.s.conversationFocus, 'task');
@@ -162,8 +161,7 @@ for (const fixture of sceneCases) {
     assert.notEqual(h.s.reviewTimer, null);
     finalTranscript(h, 'How is your day?', 'after-completion');
     assert.equal(h.s.conversationFocus, 'chat');
-    assert.equal(h.s.dialogueHistory.at(-1).text, 'How is your day?');
-    assert.equal(h.c.transitionReplyReplacement('What would you like to talk about?'), '');
+    assert.equal(h.s.dialogueHistory.findLast(message => message.speaker === 'user').text, 'How is your day?');
   });
 
   test(`${fixture.scene}: the visible end control opens reflection only when the user clicks it`, () => {

@@ -157,23 +157,68 @@ test('a clear next-step answer spoken during the previous acknowledgment is rebo
   assert.equal(h.effects.filter(effect => effect.type === 'rebound').length, 1);
 });
 
-test('a confirmed coffee step cancels a runaway provider reply immediately', () => {
-  const h = coffeeHarness();
-  h.s.coffee = Coffee.missionInitial('C04', 'C04-large-americano-here');
-  h.s.coffeeMissionId = 'C04';
-  h.c.beginExpectedResponse('user');
-  h.s.expectedResponse.responseId = 'runaway';
-  Object.assign(h.s, { duplexSpeaking: true, duplexAcceptAudio: true, awaitingModelReply: true });
-  const result = Coffee.advanceMission(h.s.coffee, 'Americano.');
-  assert.equal(h.c.commitCoffeeChoice('americano', {
-    source: 'voice', utterance: 'Americano.', missionFeedback: result,
-  }), true);
-  assert.equal(h.s.coffee.drink, 'americano');
-  assert.equal(h.s.expectedResponse, null);
-  assert.equal(h.s.duplexSpeaking, false);
-  assert.equal(h.s.duplexAcceptAudio, false);
-  assert.equal(h.c.isConversationTurnPending(), false);
-});
+for (const ending of ['response.done', 'watchdog']) {
+  test(`a confirmed coffee step preserves its pending reply until ${ending}, then advances once`, async () => {
+    const h = coffeeHarness(), nextTasks = [];
+    Object.assign(h.c, {
+      TASK_ADVANCE_DWELL_MS: 1600,
+      currentSceneConfig: () => ({ tasks: Coffee.tasks }),
+      taskRequirementsMet: () => h.s.speechDone,
+      startTask: index => { nextTasks.push(index); h.s.taskIndex = index; h.s.stage = 'active'; },
+      apple: h.c.scene,
+    });
+    h.load('completeMultimodalTask', 'latestFollowupText', 'scheduleTaskAdvance',
+      'finishDuplexTurnWhenAudioEnds', 'finishDuplexAudioOutput');
+    h.s.coffee = Coffee.missionInitial('C04', 'C04-large-americano-here');
+    h.s.coffeeMissionId = 'C04';
+    const ready = h.c.connectDuplexSession(), socket = h.s.duplexSocket;
+    const send = event => socket.onmessage({ data: JSON.stringify(event) });
+    await send({ type: 'session.created' }); await ready;
+    h.c.beginExpectedResponse('user');
+    Object.assign(h.s.expectedResponse, { responseId: 'coffee-reply', audioStarted: true });
+    const response = h.s.expectedResponse;
+    Object.assign(h.s, { duplexSpeaking: true, duplexAcceptAudio: true, awaitingModelReply: true,
+      duplexSubtitleReady: true, lastDuplexAudioAt: h.now(), lumaStartedAt: h.now() });
+    h.c.armCharacterTurnWatchdog();
+    const result = Coffee.advanceMission(h.s.coffee, 'Americano.');
+    assert.equal(h.c.commitCoffeeChoice('americano', {
+      source: 'voice', utterance: 'Americano.', missionFeedback: result,
+    }), true);
+    assert.equal(h.s.coffee.drink, 'americano');
+    assert.equal(h.s.stage, 'task-complete');
+    assert.equal(h.s.coveredGoals.has('coffee-order'), true);
+    assert.equal(h.s.expectedResponse, response, 'evidence must not cancel the current reply');
+    assert.equal(h.s.duplexSpeaking, true);
+    assert.equal(h.s.duplexAcceptAudio, true);
+    assert.equal(h.c.isConversationTurnPending(), true);
+    assert.equal(h.effects.some(effect => effect.type === 'send' && effect.data.type === 'response.cancel'), false);
+    assert.deepEqual(nextTasks, []);
+
+    if (ending === 'response.done') {
+      await h.advance(2000);
+      assert.equal(h.s.expectedResponse, response);
+      assert.deepEqual(nextTasks, [], 'the dwell timer cannot advance through a pending reply');
+      await send({ type: 'response.done', response_id: 'coffee-reply' });
+      await h.advance(160);
+    } else {
+      await h.advance(7999);
+      assert.equal(h.s.expectedResponse, response, 'keep the full existing quiet-audio grace period');
+      assert.deepEqual(nextTasks, []);
+      await h.advance(1);
+    }
+    assert.equal(h.s.expectedResponse, null);
+    assert.equal(h.s.duplexSpeaking, false);
+    assert.equal(h.s.duplexAcceptAudio, false);
+    assert.equal(h.c.isConversationTurnPending(), false);
+    assert.deepEqual(nextTasks, [], 'terminal recovery still gives the learner a quiet dwell');
+    await h.advance(2000);
+    assert.deepEqual(nextTasks, [1]);
+    await send({ type: 'response.done', response_id: 'coffee-reply' });
+    await h.advance(10000);
+    assert.deepEqual(nextTasks, [1], 'late terminal events cannot advance the step twice');
+    assert.equal(h.s.coveredGoals.size, 1);
+  });
+}
 
 test('a guest order differing from the reference confirms every stated fact', () => {
   const h = coffeeHarness();

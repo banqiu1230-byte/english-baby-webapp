@@ -45,25 +45,39 @@ const DialogueRules = (() => {
   // These are explicit conversation controls, never successful task answers.
   const supportIntent = value => {
     const raw = String(value || '').trim().replace(/[。！？!?.,]+$/g, '');
-    const clean = spokenAnswer(raw);
+    const clean = spokenAnswer(raw).replace(/^actually /, '');
+    if (/^(?:(?:can|could|would) you )?(?:please )?(?:slow down|speak (?:more )?slowly|say (?:it |that )?(?:more )?(?:slowly|slower))(?: please)?$/.test(clean)
+      || /^(?:请)?(?:慢一点|慢点说|说慢一点)$/.test(raw)) return 'slower';
+    if (/^(?:(?:can|could|would) you )?(?:please )?(?:give|show) me (?:a |one )?hint(?: please)?$/.test(clean)
+      || /^(?:给(?:我)?(?:个|一个)?提示)$/.test(raw)) return 'hint';
     if (/^(?:等一下|等一会|等会儿?|让我想想|我想一下|慢点我想想)$/.test(raw)
       || /^(?:请)?(?:稍等(?:一下)?|等我一下|给我一点时间|让我想一想|我再想想)$/.test(raw)
-      || /^(?:wait|wait a moment|hold on|one moment|let me think|give me a moment|just a second)(?: please)?$/.test(clean)) return 'wait';
+      || /^(?:(?:can|could) (?:we|i) )?(?:please )?(?:wait|wait a moment|hold on|one moment|let me think|give me (?:a moment|a second)|just a second|pause(?: (?:the interview|for a moment))?|take a (?:short )?break)(?: please)?$/.test(clean)
+      || /^(?:暂停(?:一下)?|休息一下)$/.test(raw)) return 'wait';
     if (/^(?:继续|好了继续|可以继续了|我准备好了)$/.test(raw)
       || /^(?:continue|go on|i am ready|i m ready)$/.test(clean)) return 'continue';
-    if (/^(?:再说一遍|再说一次|没听清|请再说一遍|慢一点|说慢一点)$/.test(raw)
+    if (/^(?:请)?(?:再说一遍|再说一次|没听清|重复一下|重复一遍)$/.test(raw)
       || /^(?:(?:你)?(?:能|可以|能不能|可不可以)?(?:请)?(?:再|重新)说(?:一遍|一次|慢一点|慢点)|(?:你)?(?:能|可以|能不能|可不可以)?(?:请)?说(?:慢一点|慢点))(?:吗)?$/.test(raw)
-      || /^(?:again|repeat|say (?:it |that )?again|(?:can|could|would) you (?:say (?:it |that )?again|repeat (?:it|that)|speak (?:more )?slowly|say (?:it |that )?(?:more )?slowly)|speak (?:more )?slowly|say (?:it |that )?slower)(?: please)?$/.test(clean)) return 'replay';
+      || /^(?:sorry )?(?:(?:can|could|would) you )?(?:please )?(?:again|repeat(?: (?:it|that|the question))?|say (?:it |that )?again)(?: please)?$/.test(clean)) return 'replay';
     if (/^(?:我)?(?:不会说|说不出来|不知道怎么说|不知道怎么回答|怎么说|怎么回答|帮帮我)$/.test(raw)
       || /^(?:我)?(?:还是)?(?:不知道|不清楚)怎么(?:说|回答)(?:才好)?$/.test(raw)
       || /^(?:(?:你)?(?:能|可以|能不能|可不可以)?(?:请)?(?:告诉|教)我怎么(?:说|回答)|(?:请)?帮(?:帮)?我(?:一下)?)$/.test(raw)
-      || /^(?:help|help me|i don t know what to say|i am not sure what to say|how (?:do|can|should) i (?:say|answer)(?: (?:it|that|this))?|(?:can|could|would) you (?:tell|show) me (?:how to say (?:it|that|this)|what to say|how to answer))(?: please)?$/.test(clean)) return 'example';
-    if (/^(?:这个|这句|这句话)?(?:什么意思|是什么意思)$/.test(raw)
+      || /^(?:help|(?:(?:can|could|would) you )?(?:please )?help me(?: (?:answer|with this))?|i don t know what to say|i am not sure what to say|how (?:do|can|should) i (?:say|answer)(?: (?:it|that|this))?|(?:(?:can|could|would) you )?(?:please )?(?:give|show) me an example|(?:can|could|would) you (?:tell|show) me (?:how to say (?:it|that|this)|what to say|how to answer))(?: please)?$/.test(clean)
+      || /^(?:给(?:我)?(?:个|一个)?例子|帮我回答)$/.test(raw)) return 'example';
+    if (/^(?:这|这个|这句|这句话)?(?:什么意思|是什么意思)$/.test(raw)
       || /^(?:我)?(?:不懂|没懂|听不懂|不明白|不知道)$/.test(raw)
       || /^(?:(?:我)?(?:还是|有点|真的|完全)?(?:没听懂|听不懂|没明白|不明白|不懂)|(?:这个|这句|这句话)?我(?:还是|有点)?(?:没听懂|听不懂|没明白|不明白|不懂))$/.test(raw)
       || /^(?:(?:你)?(?:能|可以|能不能|可不可以)?(?:请)?(?:翻译|解释)(?:一下|这个|这句|这句话)?(?:吗)?)$/.test(raw)
-      || /^(?:i (?:still )?don t (?:understand|know)|what does .+ mean|what do you mean|(?:can|could|would) you explain (?:it|that|this|.+))(?: please)?$/.test(clean)) return 'meaning';
+      || /^(?:i (?:still )?(?:don t|do not) (?:understand|know)(?: the question)?|what does .+ means?|what means? .+|what is (?:the )?meaning of .+|what do you mean(?: by .+)?|(?:can|could|would) you (?:explain|clarify)(?: .+)?)(?: please)?$/.test(clean)
+      || /^(?:我没理解(?:问题)?)$/.test(raw)) return 'meaning';
     return '';
+  };
+
+  const isSpecificMeaningRequest = value => {
+    const clean = spokenAnswer(value);
+    const match = clean.match(/^(?:what does (.+?) means?|what means? (.+)|what is (?:the )?meaning of (.+)|what do you mean by (.+)|(?:can|could|would) you (?:explain|clarify) (.+))$/);
+    const target = match?.slice(1).find(Boolean);
+    return Boolean(target && !/^(?:it|this|that|(?:the|this|that|your) (?:question|sentence|line))$/.test(target));
   };
 
   // Fast-path only complete social utterances. A greeting attached to an order
@@ -99,29 +113,22 @@ const DialogueRules = (() => {
       || /昨天|上周|以前|我经常|我平时/.test(raw)) return true;
     return /\b(?:favou?rite|usually|often|do you like|what do you (?:like|prefer)|tell me about|where are you from|how are you|how was your|how s your)\b/.test(asked);
   };
+  // Non-answer acknowledgments must not complete an open interview topic.
+  // Do not reject past tense, negatives, preferences or substantive questions:
+  // those can be the candidate's real answer and need semantic interpretation.
+  const isInterviewNonAnswer = value => {
+    const clean = normalize(value), raw = String(value || '').trim();
+    return !raw || isSmallTalk(value)
+      || /^(?:hi|hello|hey|good morning|good afternoon|good evening)(?: alex)?$/.test(clean)
+      || /^(?:yes|yeah|yep|no|nope|ok|okay|sure|right|fine|great|thanks|thank you|understood|i see|i understand|sounds good|of course|i agree)(?: (?:alex|please|thanks|thank you))?$/.test(clean)
+      || /^(?:i (?:will|can|would like to|want to) (?:answer|explain|tell you|share)(?: (?:that|this|it|later|a story|an example))?|let me (?:answer|explain|tell you|share)(?: (?:that|this|it|a story|an example))?)$/.test(clean)
+      || /^(?:好的|好|嗯|是的|不是|谢谢|知道了|明白了|我知道了|我来说一下|我来回答|我可以回答)[。.!！?？]*$/.test(raw);
+  };
   const requirementsMet = ({ needsAction, actionDone, needsSpeech, speechDone }) => (
     (!needsAction || actionDone) && (!needsSpeech || speechDone) && (actionDone || speechDone)
   );
 
   const isQuestion = (value) => /\?\s*$/.test(String(value || '').trim());
-
-  const transitionDwell = (value, { normal = 2600, afterQuestion = 12000 } = {}) => (
-    isQuestion(value) ? afterQuestion : normal
-  );
-
-  const transitionReplyReplacement = ({ text, stage, hasMoreTasks, taskAcknowledgment = '' }) => {
-    const reply = String(text || '').trim();
-    if (!reply || !['task-complete', 'complete'].includes(stage)) return '';
-    const broadTopicQuestion = /\b(?:what do you want to talk about|what should we talk about|anything else(?: you want)? to talk about)\b/i.test(reply);
-    const prematureEnding = /\b(?:that(?:'|’)s all(?: for now)?|we(?:'|’)re (?:all )?done|finished for (?:now|today)|done for (?:now|today))\b/i.test(reply);
-    if (stage === 'task-complete' && hasMoreTasks && prematureEnding) return 'Good. Let’s keep going.';
-    if (broadTopicQuestion) return stage === 'complete'
-      ? 'Nice work. We finished this scene.'
-      : 'Okay. Let’s keep going.';
-    if (stage === 'task-complete' && hasMoreTasks && isQuestion(reply))
-      return String(taskAcknowledgment || '').trim() || 'Okay. Let’s keep going.';
-    return '';
-  };
 
   const gentleRecast = (value) => {
     const source = String(value || '').trim();
@@ -138,13 +145,13 @@ const DialogueRules = (() => {
     normalize,
     matchesTask,
     supportIntent,
+    isSpecificMeaningRequest,
     isSmallTalk,
     isConversationOnly,
+    isInterviewNonAnswer,
     openingLine,
     requirementsMet,
     isQuestion,
-    transitionDwell,
-    transitionReplyReplacement,
     gentleRecast,
   };
 })();

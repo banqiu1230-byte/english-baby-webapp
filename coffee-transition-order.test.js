@@ -72,6 +72,7 @@ test(`changing a confirmed drink during its acknowledgment accepts ${JSON.string
     'do not publish an obsolete next question before applying the correction');
 
   say(h, 'Small.', 'size-after-correction');
+  h.c.showUnplayedCharacterLine('Small, got it.'); h.c.settleFailedDuplexTurn();
   await h.advance(1900);
   assert.equal(h.s.coffee.size, 'small');
   assert.equal(h.s.taskIndex, 2, 'the next real answer continues the visit normally');
@@ -88,6 +89,7 @@ test('an early service detail during the drink acknowledgment is retained while 
   assert.equal(h.s.stage, 'active');
   assert.match(h.effects.find(item => item.type === 'spoken').text, /for here.*small.*large/i);
   say(h, 'Small.', 'remaining-size');
+  h.c.showUnplayedCharacterLine('Small, got it.'); h.c.settleFailedDuplexTurn();
   await h.advance(1900);
   assert.equal(h.s.coffee.size, 'small');
   assert.equal(h.s.taskIndex, 3, 'do not ask the already answered service question again');
@@ -110,11 +112,12 @@ test('preferences and ordinary chat during a transition neither change the order
     const h = transitionHarness();
     h.c.scheduleTaskAdvance(1);
     say(h, text);
-    h.c.stopSpeechPlayback();
+    h.c.showUnplayedCharacterLine('How did you like it?');
+    h.c.settleFailedDuplexTurn();
     await h.advance(20000);
     assert.equal(h.s.coffee.drink, 'americano', text);
     assert.equal(h.s.coffee.size, null, text);
-    assert.equal(h.s.conversationFocus, 'chat', text);
+    assert.equal(h.s.conversationFocus, 'task', text);
     assert.equal(h.s.taskIndex, 0, text);
     assert.equal(h.s.pendingTransitionUtterance, null, text);
     assert.equal(h.effects.some(item => item.type === 'evidence' || item.type === 'spoken'), false, text);

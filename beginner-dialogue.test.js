@@ -6,6 +6,7 @@ const source = fs.readFileSync(require.resolve('./server'), 'utf8');
 const context = vm.createContext({Breakfast:require('./breakfast'), Coffee:require('./coffee')});
 const declarations = ['DUPLEX_TASKS','SCENE_FACTS'].map(name => source.match(new RegExp(`^const ${name} = \\{[^]*?^\\};`, 'm'))[0]);
 declarations.push(source.match(/^const ACTION_REQUIRED_TASKS = .*$/m)[0]);
+declarations.push(source.match(/^function conversationFlowInstructions\([^]*?^\}$/m)[0]);
 declarations.push(source.match(/^function duplexInstructions\([^]*?^\}$/m)[0]);
 vm.runInContext(declarations.join('\n'),context);
 test('beginner dialogue prioritizes complete meaning, not clipped word counts', () => {
@@ -35,11 +36,13 @@ test('coffee conversation uses the selected order and leaves transitions to the 
   assert.ok(instructions.includes('No payment, price, or purchase step'));
 });
 
-test('coffee transition confirms the resolved step without opening the next question', () => {
+test('coffee progress supplies state without prescribing a canned reply or next request', () => {
   const selected = context.Coffee.advanceMission(context.Coffee.missionInitial('C01'), 'Americano.').world;
   const instructions = context.duplexInstructions('coffee-order', false, true,
     ['coffee-order'], 'task-complete', [], undefined, selected);
-  assert.ok(instructions.includes('Current task line: Okay. An americano.'));
+  assert.ok(instructions.includes('The current step has been addressed'));
+  assert.ok(!instructions.includes(context.Coffee.acknowledgment('coffee-order', selected)));
+  assert.ok(!instructions.includes(`Current task context: ${context.Coffee.nextPrompt(selected)}`));
   assert.ok(instructions.includes('Do not start the next practical goal yourself'));
   assert.ok(instructions.includes('If the learner asks a question or keeps chatting, answer them naturally'));
   assert.ok(instructions.includes('A bare yes after an either-or question does not choose an option'));

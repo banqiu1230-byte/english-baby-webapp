@@ -46,6 +46,10 @@ mkdirSync(output, { recursive: true });
     await page.route('**/api/**', route => route.fulfill({ json: { meaning_valid: false, fixture: true } }));
     await page.goto(base, { waitUntil: 'networkidle' });
     assert.equal(await page.evaluate(() => typeof window.LumaWorldLoop?.plan), 'function', 'World module must load; legacy fallback is not a passing result');
+    assert.equal(await page.evaluate(() => typeof window.LumaNavigation?.render), 'function');
+    assert.equal(await page.evaluate(() => typeof window.LumaExperience.lifeStore?.complete), 'function');
+    assert.equal(await page.evaluate(() => state.activeView), 'world');
+    assert.deepEqual(errors, [], 'Each fixture starts without a page error');
     return { page, context };
   }
 
@@ -144,33 +148,40 @@ mkdirSync(output, { recursive: true });
       layouts.push({ fixture: `home-${label}`, width, height, ...result });
       await page.screenshot({ path: join(output, `fixture-home-${label}-${width}x${height}.png`) });
       assert.ok(result.visible && !result.horizontalOverflow, JSON.stringify(layouts.at(-1)));
-      assert.ok(Math.abs(result.gap - result.sideMargin) <= 2, `Home footer gap should match horizontal margin: ${JSON.stringify(layouts.at(-1))}`);
+      assert.ok(result.gap >= 8, `World CTA must retain breathing room above fixed navigation: ${JSON.stringify(layouts.at(-1))}`);
     }
   }
 
   try {
-    for (const kind of ['fresh', 'resume', 'resume-repair', 'retry', 'transfer', 'return']) {
+    for (const kind of ['fresh', 'resume', 'resume-repair', 'next-mission', 'next-location', 'return']) {
       const { page, context } = await fresh(`home-${kind}`);
       if (kind !== 'fresh') await page.evaluate(kind => {
         const sceneId = kind === 'return' ? 'kitchen' : 'coffee';
         const taskId = sceneId === 'kitchen' ? 'breakfast-drink' : 'coffee-order';
         const store = LumaExperience.store;
         const missionId = sceneId === 'coffee' ? kind === 'resume-repair' ? 'C03' : 'C01' : null;
-        const sessionId = store.beginSession({ sceneId, missionId, mode: 'guided' });
+        const sessionId = store.beginSession({ sceneId, missionId, mode: 'guided', scope: 'life-event' });
         if (kind.startsWith('resume')) store.saveCheckpoint({ sessionId, sceneId, missionId, taskIndex: 0, practiceMode: 'guided' });
         else {
-          if (kind === 'retry') store.recordExposure({ id: 'home-fixture-help', sessionId, sceneId, taskId, targetId: 'choose-drink', kind: 'keyword' });
-          store.recordAttempt({ id: 'home-fixture-answer', sessionId, sceneId, taskId, targetId: 'choose-drink', source: 'voice', language: 'en', outcome: 'success', supportLevel: kind === 'retry' ? 2 : 0, conditionsTracked: true, promptModality: 'audio-text' });
-          store.completeSession({ id: sessionId, sceneId });
+          if (kind === 'next-mission') store.recordExposure({ id: 'home-fixture-help', sessionId, sceneId, taskId, targetId: 'choose-drink', kind: 'keyword' });
+          store.recordAttempt({ id: 'home-fixture-answer', sessionId, sceneId, taskId, targetId: 'choose-drink', source: 'voice', language: 'en', outcome: 'success', supportLevel: kind === 'next-mission' ? 2 : 0, conditionsTracked: true, promptModality: 'audio-text' });
+          LumaExperience.lifeStore.complete(store.completeSession({ id: sessionId, sceneId }));
+          if (kind === 'next-location') for (const missionId of ['C02','C03','C04']) {
+            const id = store.beginSession({ sceneId: 'coffee', missionId, scope: 'life-event' });
+            LumaExperience.lifeStore.complete(store.completeSession({ id, sceneId: 'coffee' }));
+          }
         }
         LumaExperience.render();
       }, kind);
-      const expected = kind === 'fresh' ? 'start' : kind === 'resume-repair' ? 'resume' : kind;
-      assert.equal(await page.evaluate(() => LumaWorldLoop.plan(LumaExperience.store.getProfile(), { checkpoint: LumaExperience.store.getCheckpoint() }).kind), expected);
+      const next = await page.evaluate(() => LumaExperience.homeStep());
+      assert.equal(next.sceneId, kind === 'next-location' ? 'kitchen' : 'coffee');
+      assert.equal(next.missionId, kind === 'next-location' ? null : kind === 'next-mission' ? 'C02' : kind === 'resume-repair' ? 'C03' : 'C01');
+      assert.equal(next.kind === 'resume', kind.startsWith('resume'));
+      assert.equal(await page.locator('#adventureCta').textContent(), kind === 'fresh' ? '开始生活' : '继续生活');
       await homeLayout(page, kind);
       await context.close();
     }
-    checks.push('Fresh/resume/retry/transfer/return homepage CTAs stay above navigation with matching side/bottom spacing at 320 and 393 widths');
+    checks.push('Fresh/resume/next-mission/next-location/return world CTAs share the life resolver and remain above navigation at 320 and 393 widths');
     {
       const { page, context } = await fresh('guided-retry');
       const plan = await completedCafe(page);
@@ -180,6 +191,8 @@ mkdirSync(output, { recursive: true });
       await layout(page, 'guided-result');
       const sessionsBefore = await page.evaluate(() => LumaExperience.store.getProfile().sessions.length);
       const previousSession = await page.evaluate(() => LumaExperience.currentSession());
+      assert.equal(await page.evaluate(() => LumaExperience.lifeStore.summary().totalXP), 30);
+      assert.equal(await page.evaluate(() => LumaExperience.homeStep().missionId), 'C02', 'Optional result retry must not replace the next world event');
       await page.click('#repeatScene');
       await page.locator('#sceneIntro').waitFor({ state: 'visible' });
       assert.equal(await page.evaluate(() => LumaExperience.store.getProfile().sessions.length), sessionsBefore);
@@ -195,9 +208,11 @@ mkdirSync(output, { recursive: true });
       const plan = await completedCafe(page, false);
       assert.equal(plan.kind, 'transfer');
       assert.equal(plan.sceneId, 'kitchen');
-      const before = await page.evaluate(() => ({ session: LumaExperience.currentSession(), count: LumaExperience.store.getProfile().sessions.length }));
+      const before = await page.evaluate(() => ({ session: LumaExperience.currentSession(), count: LumaExperience.store.getProfile().sessions.length, xp: LumaExperience.lifeStore.summary().totalXP, runs: coffeeMissionProgress.runs }));
       await page.evaluate(() => showReview());
       assert.equal(await page.evaluate(() => LumaExperience.store.getProfile().sessions.length), before.count, 'Duplicate review display must not create a session');
+      assert.equal(await page.evaluate(() => LumaExperience.lifeStore.summary().totalXP), before.xp);
+      assert.equal(await page.evaluate(() => coffeeMissionProgress.runs), before.runs);
       await page.click('#repeatScene');
       await page.locator('#sceneIntro').waitFor({ state: 'visible' });
       assert.equal(await page.evaluate(() => state.selectedScene), 'kitchen');
@@ -246,7 +261,7 @@ mkdirSync(output, { recursive: true });
           breakfast: { drink: 'milk', cupPlaced: true, amount: 'more' }, coveredGoals: ['breakfast-drink', 'breakfast-cup'], goalRecords: { 'breakfast-drink': { supportLevel: 3 } } });
         LumaExperience.render();
       });
-      assert.equal(await page.locator('#adventureCta').textContent(), '继续这件事');
+      assert.equal(await page.locator('#adventureCta').textContent(), '继续生活');
       await page.click('#adventureCta');
       await page.waitForFunction(() => state.sceneStarted && state.selectedScene === 'kitchen' && LumaExperience.currentSession());
       const result = await page.evaluate(() => ({ index: state.taskIndex, breakfast: state.breakfast, covered: [...state.coveredGoals], checkpoint: LumaExperience.store.getCheckpoint(), goals: state.sessionGoals }));
@@ -256,6 +271,53 @@ mkdirSync(output, { recursive: true });
       assert.equal(result.checkpoint.taskIndex, 0);
       assert.ok(result.goals['breakfast-drink']?.supportLevel <= 1, 'Prior full-example help must reset; fresh guided subtitles may record level 1');
       checks.push('Old partial breakfast checkpoint restarts at step 0 with fresh world and help state');
+      await context.close();
+    }
+    {
+      const { page, context } = await fresh('learning-review-with-pending-life');
+      const pending = await page.evaluate(() => {
+        const store = LumaExperience.store;
+        const airport = store.beginSession({ sceneId: 'airport', scope: 'life-event' });
+        store.saveCheckpoint({ sessionId: airport, sceneId: 'airport', taskIndex: 2 });
+        const practice = store.beginSession({ sceneId: 'coffee', missionId: 'C01', scope: 'target-practice' });
+        store.recordAttempt({ id: 'old-thanks', sessionId: practice, sceneId: 'coffee', missionId: 'C01',
+          taskId: 'coffee-thanks', targetId: 'thank-person', source: 'voice', language: 'en', outcome: 'success',
+          supportLevel: 2, conditionsTracked: true, promptModality: 'audio-text', utterance: 'Thank you.',
+          at: new Date(Date.now()-2*86400000).toISOString() });
+        store.completeSession({ id: practice, sceneId: 'coffee' });
+        LumaExperience.render(); return airport;
+      });
+      assert.equal(await page.evaluate(() => LumaExperience.homeStep().sessionId), pending);
+      assert.equal(await page.locator('#adventureCta').textContent(), '继续生活');
+      assert.equal(await page.evaluate(() => LumaExperience.lifeStore.summary().totalXP), 0);
+      await page.click('#bottomNav [data-nav="growth"]');
+      await page.click('#startReview');
+      await page.locator('#sceneIntro').waitFor({ state: 'visible' });
+      assert.equal(await page.evaluate(() => introOptions.reviewTaskId), 'coffee-thanks');
+      assert.equal(await page.evaluate(() => state.sessionScope), 'target-practice');
+      await page.click('#introReady');
+      await page.waitForFunction(() => state.sceneStarted && state.sessionScope === 'target-practice' && currentTask().id === 'coffee-thanks');
+      await page.evaluate(() => {
+        clearTaskAdvance(); clearIdleNudge(); stopSpeechPlayback();
+        const taskId = currentTask().id, goal = goalRecord(taskId);
+        goal.meaningAccepted = true; goal.spoke = true; goal.language = 'en'; goal.supportLevel = 0;
+        LumaExperience.noteAnswer({ evidenceSessionId: LumaExperience.currentSession(), source: 'voice',
+          sceneId: 'coffee', taskId, missionId: 'C01', messageId: 'short-thanks', answer: 'Thank you.', supportLevel: 0 }, 'success');
+        state.coffee = Coffee.advanceMission(state.coffee, 'Thank you.').world;
+        state.speechDone = true; state.actionDone = true;
+        completeMultimodalTask(); showReview();
+      });
+      await page.locator('#reviewScreen.is-active').waitFor();
+      assert.equal(await page.locator('#reviewTitle').textContent(), '这次短练习完成了');
+      assert.equal(await page.locator('#lifeReward').isHidden(), true);
+      assert.equal(await page.evaluate(() => LumaExperience.lifeStore.summary().totalXP), 0);
+      assert.deepEqual(await page.evaluate(() => coffeeMissionProgress.completed), []);
+      assert.equal(await page.evaluate(() => LumaExperience.store.getCheckpoint().sessionId), pending);
+      assert.equal(await page.evaluate(() => LumaExperience.store.getProfile().sessions.at(-1).scope), 'target-practice');
+      await page.click('#finishReview');
+      assert.equal(await page.evaluate(() => state.activeView), 'world');
+      assert.equal(await page.evaluate(() => LumaExperience.homeStep().sessionId), pending);
+      checks.push('Learning review bypasses a pending airport event, completes only one target with no life XP or mission unlock, then world still continues the airport');
       await context.close();
     }
     assert.deepEqual(errors, []);

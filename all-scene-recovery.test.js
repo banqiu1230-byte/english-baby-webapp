@@ -63,8 +63,10 @@ function startRunawayResponse(h) {
   h.c.beginExpectedResponse('user');
   h.s.expectedResponse.responseId = 'runaway-provider';
   Object.assign(h.s, { awaitingModelReply: true, duplexSpeaking: true,
-    duplexAcceptAudio: true, duplexSubtitleReady: false });
+    duplexAcceptAudio: true, duplexSubtitleReady: false,
+    lumaStartedAt: h.now(), lastDuplexAudioAt: h.now() });
   h.c.armCharacterTurnWatchdog();
+  return h.s.expectedResponse;
 }
 
 function assertUsableFloor(h) {
@@ -84,16 +86,27 @@ async function connect(h) {
 }
 
 for (const sample of cases) {
-  test(`${sample.label}: accepted meaning immediately cancels a runaway reply and schedules progression`, () => {
+  test(`${sample.label}: accepted meaning commits immediately and preserves the reply until its watchdog releases it`, async () => {
     const h = recoveryHarness(sample);
     const { context } = addFinalAnswer(h, sample.answer);
-    startRunawayResponse(h);
+    const response = startRunawayResponse(h);
     h.c.applyDynamicFeedback({ meaning_valid: true, choice: sample.choice }, context);
     assert.equal(h.s.speechDone, true);
     assert.equal(h.goal.meaningAccepted, true);
     assert.equal(h.s.stage, 'task-complete');
-    assertUsableFloor(h);
+    assert.equal(h.s.coveredGoals.has(sample.taskId), true, 'progress commits before the provider finishes');
+    assert.equal(h.evidence.filter(([, result]) => result === 'success').length, 1);
+    assert.equal(h.s.expectedResponse, response, 'accepted meaning must preserve the actual reply');
+    assert.equal(h.c.isConversationTurnPending(), true);
+    assert.equal(h.effects.some(effect => effect.type === 'spoken'), false, 'do not insert a canned acknowledgment');
+    assert.equal(h.effects.some(effect => effect.type === 'send' && effect.data.type === 'response.cancel'), false);
     assert.ok(h.effects.some(effect => effect.type === 'advance'), 'a confirmed answer must have a next step');
+    await h.advance(7999);
+    assert.equal(h.s.expectedResponse, response, 'the preserved reply keeps the floor before its deadline');
+    await h.advance(1);
+    assertUsableFloor(h);
+    assert.equal(h.s.coveredGoals.has(sample.taskId), true, 'reply failure must not revoke accepted evidence');
+    assert.equal(h.evidence.filter(([, result]) => result === 'success').length, 1, 'watchdog recovery must not duplicate evidence');
   });
 
   test(`${sample.label}: a usable hypothesis survives a missing ASR final and is evaluated once`, async () => {
@@ -108,8 +121,9 @@ for (const sample of cases) {
     assert.equal(message.final, true, 'a usable complete hypothesis must enter normal meaning evaluation');
     assert.equal(h.s.speechDone, true, 'a missing terminal ASR event must not discard a clear answer');
     assert.equal(h.evidence.filter(([, result]) => result === 'success').length, 1);
+    assert.equal(h.c.isConversationTurnPending(), true, 'finalizing ASR must preserve the expected provider reply');
+    await h.advance(10000);
     assertUsableFloor(h);
-    await h.advance(6000);
     assert.equal(h.evidence.filter(([, result]) => result === 'success').length, 1, 'recovery cannot score the same turn twice');
   });
 
@@ -138,9 +152,9 @@ for (const sample of cases) {
     assertUsableFloor(h);
     assert.ok(message.status || h.s.dialogueHistory.some(item => item.speaker === 'luma' && item.text.trim()),
       'the answer needs a readable follow-up instead of a silent unchanged task');
-    assert.ok(h.effects.some(effect => effect.type === 'spoken')
-      || h.s.dialogueHistory.some(item => item.speaker === 'luma' && item.text.trim()),
-    'a temporary toast alone is not a persistent recovery route');
+    assert.match(message.status, /语音回复未接上.*你的话已保留.*提示/,
+      'the transcript retains a persistent recovery status without inventing character dialogue');
+    assert.equal(h.s.activeQuestion, sample.prompt, 'transport failure must not replace the real question');
   });
 
   test(`${sample.label}: ASR recovery survives early audio started and ignores a late duplicate final`, async () => {
@@ -152,10 +166,11 @@ for (const sample of cases) {
     assert.equal(h.s.activeVoiceTurn, null, 'audio start releases the local speech floor');
     await h.advance(6500);
     assert.equal(h.s.speechDone, true, 'the original item must still finalize after losing the local floor');
-    assertUsableFloor(h);
+    assert.equal(h.s.expectedResponse?.responseId, 'started-too-soon', 'ASR recovery cannot cancel the response already started');
     assert.equal(h.evidence.filter(([, result]) => result === 'success').length, 1);
     await send({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'early-response', transcript: sample.answer });
     await h.advance(6500);
+    assertUsableFloor(h);
     assert.equal(h.evidence.filter(([, result]) => result === 'success').length, 1);
     assert.equal(h.s.dialogueHistory.filter(item => item.speaker === 'user').length, 1);
     assert.equal(h.s.dialogueHistory.find(item => item.speaker === 'user').text, sample.answer);
@@ -166,8 +181,13 @@ for (const sample of cases) {
     const send = await connect(h);
     await send({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'final-only', transcript: sample.answer });
     assert.equal(h.s.speechDone, true, 'terminal recognition with words must not disappear because started was lost');
-    assertUsableFloor(h);
+    const response = h.s.expectedResponse;
+    assert.ok(response, 'a final-only answer still retains its expected reply');
     await send({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'final-only', transcript: sample.answer });
+    assert.equal(h.s.expectedResponse, response, 'a duplicate final cannot replace or retire the reply');
+    assert.equal(h.evidence.filter(([, result]) => result === 'success').length, 1);
+    await h.advance(10000);
+    assertUsableFloor(h);
     assert.equal(h.evidence.filter(([, result]) => result === 'success').length, 1);
   });
 }

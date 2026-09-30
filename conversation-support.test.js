@@ -8,17 +8,32 @@ test('help, hesitation and replay are distinguished from valid short answers', (
     "I don't understand.", 'What does americano mean?', 'Could you explain that?']) assert.equal(supportIntent(text), 'meaning', text);
   for (const text of ['怎么说', '我不知道怎么回答', '我不知道怎么说才好', '请帮我一下',
     "I don't know what to say.", 'Could you tell me what to say?']) assert.equal(supportIntent(text), 'example', text);
-  for (const text of ['再说一遍', '能再说慢一点吗', 'Could you speak more slowly?']) assert.equal(supportIntent(text), 'replay', text);
+  for (const text of ['再说一遍', '能再说慢一点吗', 'Could you repeat the question?']) assert.equal(supportIntent(text), 'replay', text);
   for (const text of ['等一下', '给我一点时间', 'Give me a moment.']) assert.equal(supportIntent(text), 'wait', text);
   assert.equal(supportIntent('继续'), 'continue');
   assert.equal(supportIntent('Could you say that again?'), 'replay');
   for (const text of ['No, thanks.', 'Yes.', 'Here you are.', 'Milk.', 'My name is Li.']) assert.equal(supportIntent(text), '');
 });
 
+test('imperfect meaning questions survive recognition wording without becoming task answers', () => {
+  for (const text of [
+    'What does personal response before what means?',
+    'What does personally responsible for means?',
+    'What means personally responsible for?',
+    'What is the meaning of responsible for?',
+    'What do you mean by responsible for?',
+  ]) assert.equal(supportIntent(text), 'meaning', text);
+  for (const text of [
+    'I was personally responsible for research.',
+    'My work means a lot to me.',
+    'I explained what the result means to the team.',
+  ]) assert.equal(supportIntent(text), '', text);
+});
+
 test('natural beginner help requests receive support instead of replaying the task question', () => {
   for (const [text, expected] of [
     ['我还是没听懂', '她在问你找到了什么。'],
-    ['What does milk mean?', '她在问你找到了什么。'],
+    ['What does that mean?', '她在问你找到了什么。'],
     ['我不知道怎么说才好', '可以说：Milk.'],
     ['请帮我一下', '可以说：Milk.'],
   ]) {
@@ -79,6 +94,43 @@ test('silence produces at most two visual supports without speaking over thought
   assert.equal(h.timers.size, 0);
 });
 
+test('a reply ending while help is open cannot restart idle prompts or consume help evidence', async () => {
+  let helpOpen = true;
+  const help = [];
+  const h = harness({ LumaExperience: { isHelpOpen: () => helpOpen, noteHelp: (...args) => help.push(args) } });
+  h.load('finishDuplexTurnWhenAudioEnds');
+  h.c.beginExpectedResponse('user');
+  Object.assign(h.s, { duplexOutputDone: true, duplexSpeaking: true, duplexAcceptAudio: false,
+    awaitingModelReply: true, speechDone: false, actionDone: false });
+  h.c.finishDuplexTurnWhenAudioEnds();
+  await h.advance(120000);
+  assert.equal(h.c.isConversationTurnPending(), false, 'the reply still finishes normally');
+  assert.equal(h.s.idleNudgeCount, 0);
+  assert.equal(h.effects.filter(effect => effect.type === 'toast').length, 0);
+  assert.deepEqual(help, [], 'reading help is not a reason to record an unsolicited idle explanation');
+  helpOpen = false;
+  h.c.scheduleIdleNudge();
+  await h.advance(11999);
+  assert.equal(h.s.idleNudgeCount, 0);
+  await h.advance(1);
+  assert.equal(h.s.idleNudgeCount, 1, 'closing help restores the ordinary first idle prompt');
+  assert.equal(h.effects.filter(effect => effect.type === 'toast').length, 1);
+});
+
+test('an already scheduled idle callback checks whether help opened in the meantime', async () => {
+  let helpOpen = false;
+  const h = harness({ LumaExperience: { isHelpOpen: () => helpOpen } });
+  h.c.scheduleIdleNudge();
+  await h.advance(1000);
+  helpOpen = true;
+  // Leave the old timer alive to exercise the callback guard independently
+  // of the UI's normal pauseGuidance cancellation.
+  await h.advance(120000);
+  assert.equal(h.s.idleNudgeCount, 0);
+  assert.equal(h.effects.filter(effect => effect.type === 'toast').length, 0);
+  assert.equal(h.timers.size, 0);
+});
+
 test('an obsolete help transcript cannot cancel the current response', () => {
   const h = harness(); h.load('handleConversationSupport');
   const context = h.c.captureUserTurnContext(); h.s.practiceSession++;
@@ -110,6 +162,24 @@ test('connection failure replaces the pending opening label with recovery', () =
   h.c.showPendingTaskPrompt('可以说 Yes, please.', { updatesQuestion: false });
   h.c.settleFailedDuplexTurn();
   assert.equal(h.s.activeQuestion, 'Do you want more water?');
+});
+
+test('technical reply failure preserves a confirmed learner turn and the actual question', () => {
+  const h = harness(); h.load('handleConversationSupport');
+  const question = h.s.activeQuestion;
+  const learner = { id: 1, speaker: 'user', text: 'What does milk means?', final: true, taskId: h.task.id };
+  h.s.dialogueHistory = [learner]; h.s.messageSerial = 1; h.s.conversationFocus = 'chat';
+  h.c.beginExpectedResponse('user'); h.s.awaitingModelReply = true;
+  h.c.settleFailedDuplexTurn();
+  assert.equal(h.s.activeQuestion, question);
+  assert.equal(h.s.dialogueHistory.length, 1, 'no invented character reply is added for a network failure');
+  assert.equal(h.s.dialogueHistory[0].text, learner.text);
+  assert.match(learner.status, /语音回复未接上.*你的话已保留.*提示/);
+  assert.equal(h.c.isConversationTurnPending(), false);
+  const spoken = []; h.c.speak = line => spoken.push(line);
+  assert.equal(h.c.handleConversationSupport('What does that mean?', h.c.captureUserTurnContext(), learner), true);
+  assert.equal(spoken[0], '她在问你找到了什么。', 'generic meaning support still uses the real question after recovery');
+  assert.equal(h.s.coveredGoals.size, 0);
 });
 
 test('late help final preserves the full character answer already playing', () => {
