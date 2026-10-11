@@ -7,7 +7,13 @@
   const icon = name => { const node = el('i', null, `ph ph-${name}`); node.setAttribute('aria-hidden', 'true'); return node; };
   const button = (text, callback, className = 'study-link') => { const node = el('button', text, className); node.type = 'button'; node.addEventListener('click', callback); return node; };
   const sceneNames = { interview: '设计师面试', coffee: '街角咖啡店', kitchen: '家中早餐', airport: '机场出行', office: '初次见面' };
-  const sceneImages = { coffee: 'coffee', kitchen: 'breakfast', airport: 'airport', office: 'office' };
+  const sceneImages = {
+    interview: './assets/interview/room.png',
+    coffee: './assets/optimized/coffee-home-860.jpg',
+    kitchen: './assets/optimized/breakfast-preview-860.jpg',
+    airport: './assets/optimized/airport-preview-860.jpg',
+    office: './assets/optimized/office-preview-860.jpg',
+  };
   const PROFILE_KEY = 'luma-personal-v1', REVIEW_KEY = 'luma-expression-reviews-v2';
   let storage, snapshot, request, dialogTrigger, personal = {}, reviews = {};
   try { storage = window.localStorage; personal = JSON.parse(storage.getItem(PROFILE_KEY) || '{}') || {}; reviews = JSON.parse(storage.getItem(REVIEW_KEY) || '{}') || {}; } catch { /* Defaults remain usable when local storage is unavailable. */ }
@@ -82,7 +88,8 @@
     if (!container || !catalog || container.children.length) return;
     for (const sceneId of Object.keys(sceneNames)) {
       const node = button('', () => openDictionary(sceneId), 'dictionary-scene');
-      const img = el('img'); img.src = sceneId === 'interview' ? './assets/interview/room.png' : `./assets/optimized/${sceneImages[sceneId]}-thumb-220.jpg`; img.alt = '';
+      node.dataset.scene = sceneId;
+      const img = el('img'); img.src = sceneImages[sceneId]; img.alt = '';
       node.append(img, el('strong', sceneNames[sceneId]), el('small', `${catalog.SCENE_TASKS[sceneId].length} 组${sceneId === 'interview' ? '面试' : '生活'}表达`));
       container.append(node);
     }
@@ -207,10 +214,10 @@
       const action = button('看看怎么改', () => openExpression(attempt)); action.append(icon('arrow-right')); card.append(action); return card;
     }));
     if (!corrections.length) {
-      const empty = el('div', null, 'study-empty'); empty.append(icon('check-circle'));
+      const empty = el('div', null, 'study-empty');
       const allChecked = candidates.length && candidates.every(a => ['natural', 'suggestion'].includes(cachedReview(a)?.status));
       empty.append(el('p', backgroundReview ? '正在检查最近的表达…'
-        : allChecked ? '最近检查的表达，没有需要纠正的地方。' : '需要纠正的表达会留在这里。'));
+        : allChecked ? '暂时没有需要优化的表达。' : '需要优化的表达会留在这里。'));
       container.append(empty);
     }
   }

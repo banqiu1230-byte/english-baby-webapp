@@ -39,7 +39,8 @@ async function geometry(page) {
       await page.locator('#allWorldPlaces').click();
       await page.locator('[data-place-select="coffee"]').click();
       await page.locator('#sceneSheet.is-open').waitFor();
-      await page.locator('#sheetEvents summary').click();
+      assert.equal(await page.locator('#sheetEvents').evaluate(node => node.hidden), false, 'Coffee task group is not hidden');
+      assert.equal(await page.locator('#sheetEventList [data-world-event="C01"]').isVisible(), true, 'Coffee tasks are visible without expansion');
       await page.waitForFunction(() => document.querySelector('#sheetImage').complete && document.querySelector('#sheetImage').naturalWidth > 0);
       await page.locator('#sheetImage').evaluate(image => image.decode());
       await page.locator('#sceneSheet .sheet-scroll').evaluate(element => { element.scrollTop = 0; });

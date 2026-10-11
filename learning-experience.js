@@ -951,17 +951,27 @@
     }
     const content = $('learningHelpContent'); content.replaceChildren();
     const item = contextualDetails(task().id);
-    if (kind === 'meaning') { noteHelp(1, 'meaning'); content.append(row('先弄懂对方的意思', item[2], 'ear')); }
+    if (kind === 'meaning') {
+      noteHelp(1, 'meaning');
+      const meaning = document.createElement('p'); meaning.className = 'help-meaning'; meaning.textContent = item[2];
+      content.append(meaning);
+    }
     else if (['menu', 'keyword'].includes(kind)) {
       const words = {
         'choose-drink': s().selectedScene === 'coffee' ? 'latte · 拿铁 / americano · 美式' : 'milk · 牛奶 / water · 水',
         'choose-size': 'small · 小杯 / large · 大杯', 'choose-service': 'for here · 堂食 / to go · 带走',
         'thank-person': 'thank · 感谢', 'offer-item': 'here · 给你', 'adjust-amount': 'more · 再来 / enough · 够了',
-        'confirm-belonging': 'mine · 我的', 'find-location': 'A12 · 登机口', 'give-name': 'my name · 我的名字',
+        'confirm-belonging': 'mine · 我的', 'find-location': 'A12 · 登机口',
+      };
+      const starters = {
+        'state-purpose': ['I’m here to see _____.', '横线处填要见的人名。'],
+        'give-name': ['My name is _____.', '横线处填你的名字。'],
       };
       const interviewTask = s().selectedScene === 'interview' ? InterviewModule?.taskById(task().id) : null;
       const keywords = interviewTask?.keywords;
-      noteHelp(2, 'keyword'); content.append(row(interviewTask ? '先抓住表达重点' : '先用一个词试试',
+      noteHelp(2, 'keyword');
+      if (starters[item[0]]) content.append(row(...starters[item[0]], 'key'));
+      else content.append(row(interviewTask ? '先抓住表达重点' : '先用一个词试试',
         (Array.isArray(keywords) ? keywords.join(' · ') : keywords) || words[item[0]] || item[3].split(' ').slice(0, 2).join(' '), 'key'));
     }
     else if (kind === 'example') {

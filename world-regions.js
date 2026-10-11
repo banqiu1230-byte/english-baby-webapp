@@ -133,9 +133,6 @@
     }
     list.replaceChildren(); list.dataset.sceneId = sceneId;
     if (group.hidden) return;
-    if (sceneId === 'interview') group.open = true;
-    const summary = group.querySelector('summary');
-    if (summary) summary.textContent = sceneId === 'interview' ? '选择面试练习' : '这里可以做什么';
     for (const event of place.events) {
       const item = button(event.title, () => window.LumaExperience?.previewScene(sceneId, event.missionId), 'world-event-choice');
       item.dataset.worldEvent = event.id; item.dataset.missionId = event.missionId || ''; item.setAttribute('aria-pressed', String(event.missionId === selectedMission));

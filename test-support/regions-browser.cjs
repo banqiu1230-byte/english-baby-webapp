@@ -121,7 +121,8 @@ mkdirSync(output, { recursive: true });
 
         await choosePlace('coffee');
         assert.equal(await page.locator('#sheetEventList [data-world-event]').count(), 4, 'One cafe entry contains all four authored events');
-        if (!await page.locator('#sheetEvents').evaluate(node => node.open)) await page.locator('#sheetEvents > summary').click();
+        assert.equal(await page.locator('#sheetEvents').evaluate(node => node.hidden), false, 'Coffee task group is not hidden');
+        assert.equal(await page.locator('#sheetEventList [data-world-event="C01"]').isVisible(), true, 'Coffee tasks are visible without expansion');
         for (const mission of ['C01', 'C02', 'C03', 'C04']) {
           await page.locator(`#sheetEventList [data-world-event="${mission}"]`).click();
           assert.equal(await page.evaluate(() => sheetSelection.missionId), mission);
@@ -141,13 +142,15 @@ mkdirSync(output, { recursive: true });
         checks.push('coffee four-mission selection without session or microphone');
 
         await choosePlace('interview');
-        assert.equal(await page.locator('#sheetEvents').evaluate(node => node.open), true, 'Interview drill selection is immediately visible');
+        assert.equal(await page.locator('#sheetEvents').evaluate(node => node.hidden), false, 'Interview drill group is not hidden');
+        assert.equal(await page.locator('#sheetEventList [data-world-event="I01"]').isVisible(), true, 'Interview drills are visible without expansion');
         assert.equal(await page.locator('#sheetEventList [data-world-event]').count(), 7);
         for (const mission of ['I01', 'I02', 'I03', 'I04', 'I05', 'I06', 'I07']) {
           await page.locator(`#sheetEventList [data-world-event="${mission}"]`).click();
           assert.equal(await page.evaluate(() => sheetSelection.missionId), mission);
           assert.equal(await page.locator(`#sheetEventList [data-world-event="${mission}"]`).getAttribute('aria-pressed'), 'true');
-          assert.equal(await page.locator('#sheetEvents').evaluate(node => node.open), true);
+          assert.equal(await page.locator('#sheetEvents').evaluate(node => node.hidden), false);
+          assert.equal(await page.locator(`#sheetEventList [data-world-event="${mission}"]`).isVisible(), true, 'Selected interview drill remains visible');
         }
         assert.deepEqual(await records(), empty, 'Selecting interview drills only changes the preview');
         await page.screenshot({ path: join(output, `interview-events-${width}.png`) });
