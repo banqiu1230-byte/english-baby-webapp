@@ -117,8 +117,14 @@ test('a clear next-step answer spoken during the previous acknowledgment is rebo
     currentSceneConfig: () => ({ tasks }),
     requestLanguageFeedback: (question, answer, context) => h.effects.push({ type: 'rebound', question, answer, context }),
   });
-  h.load('coffeeTaskForChangedField', 'stageTransitionUtterance', 'consumeTransitionUtterance',
+  h.load('coffeeTaskForChangedField', 'stageTransitionUtterance',
     'latestFollowupText', 'scheduleTaskAdvance');
+  h.c.startTask = (index, options) => {
+    assert.equal(options.speakAgain, false);
+    assert.equal(options.preserveConversation, true);
+    h.s.taskIndex = index; h.s.stage = 'active';
+    Object.assign(h.task, tasks[index]);
+  };
   h.s.selectedScene = 'coffee';
   h.s.coffee = Coffee.advanceMission(Coffee.missionInitial('C01'), 'Americano.').world;
   h.s.coffeeMissionId = 'C01';
@@ -133,19 +139,10 @@ test('a clear next-step answer spoken during the previous acknowledgment is rebo
   h.c.finalizeLearnerTranscript('Large.', { turn });
   const message = h.s.dialogueHistory[0];
   assert.equal(message.text, 'Large.');
-  assert.equal(message.taskId, 'coffee-order');
-  assert.equal(message.status, '已听到 · 下一步出现后确认');
-  assert.equal(h.s.pendingTransitionUtterance.taskId, 'coffee-size');
-  assert.equal(h.s.expectedResponse, null, 'the obsolete transition response must not keep advancement busy');
-  assert.equal(h.effects.some(effect => effect.type === 'feedback' || effect.type === 'rebound'), false);
-
-  h.task.id = 'coffee-size';
-  h.s.taskIndex = 1;
-  h.s.stage = 'active';
-  h.s.activeQuestion = 'Would you like a small or a large americano?';
-  assert.equal(h.c.consumeTransitionUtterance(), true);
   assert.equal(message.taskId, 'coffee-size');
-  assert.equal(message.status, '已接到下一步 · 正在确认');
+  assert.equal(h.s.taskIndex, 1);
+  assert.equal(h.s.expectedResponse?.turnId, turn.id, 'the original natural reply keeps its owner while the task catches up');
+  assert.equal(h.s.expectedResponse?.taskId, 'coffee-size');
   assert.equal(h.effects.filter(effect => effect.type === 'rebound').length, 1);
   const rebound = h.effects.find(effect => effect.type === 'rebound');
   assert.equal(rebound.question, 'What can I get for you?', 'preserve the question actually heard when the early size was spoken');
@@ -153,7 +150,7 @@ test('a clear next-step answer spoken during the previous acknowledgment is rebo
   assert.equal(rebound.context.taskId, 'coffee-size');
   assert.equal(rebound.context.messageId, message.id);
   assert.equal(rebound.context.final, true);
-  assert.equal(h.c.consumeTransitionUtterance(), false);
+  h.c.finalizeLearnerTranscript('Large.', { turn });
   assert.equal(h.effects.filter(effect => effect.type === 'rebound').length, 1);
 });
 

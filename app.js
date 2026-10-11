@@ -82,6 +82,7 @@ const transcriptLedger = new VoiceRuntime.TranscriptLedger();
 // in memory; explicit mute/exit/reset still discards it.
 const microphoneBuffer = new VoiceRuntime.PcmBuffer(16000 * 2 * 60);
 const CHARACTER_AUDIO_QUIET_MS = 8000;
+const CHARACTER_DRAIN_GRACE_MS = 1200;
 const CHARACTER_CLOCK_STALL_MS = 8000;
 const CHARACTER_TURN_MAX_MS = 30000;
 
@@ -302,6 +303,8 @@ const state = {
   connectionGeneration: 0,
   firstPacketTimer: null,
   bufferOverflow: false,
+  microphonePreroll: new Int16Array(0),
+  lastHeldSpeechAt: 0,
   deferredVoiceEvents: [],
   audioWorkletLoaded: false,
   captionAudioStart: 0,
@@ -310,6 +313,7 @@ const state = {
   captureSampleRate: 16000,
   duplexSocket: null,
   duplexReady: false,
+  duplexInputMuted: null,
   duplexFailureCount: 0,
   voiceConnectionPaused: false,
   duplexConnectPromise: null,
@@ -360,7 +364,6 @@ const state = {
   lastBargeInEnergyAt: 0,
   lastServerSpeechAt: 0,
   pendingServerTurnContext: null,
-  pendingTransitionUtterance: null,
   micNoiseFloor: .002,
   micCalibrationUntil: 0,
   lastMicFrameAt: 0,
@@ -772,7 +775,9 @@ function syncVoiceStatus() {
     : state.micMuted ? '麦克风已关闭 · 点麦克风继续'
     : !state.handsFreeListening ? '正在准备麦克风…'
     : !state.duplexReady ? (state.bufferOverflow ? '连接较慢 · 恢复后请再说一次' : '正在连接 · 已暂存你的声音')
-    : microphoneWaitsForCharacter() ? `${currentTask().speaker || 'Luma'} 正在说 · 你也可以开口`
+    : isConversationPlaybackActive() ? `${currentTask().speaker || 'Luma'} 正在说 · 你也可以开口`
+    : state.awaitingModelReply ? '听到了，正在回应…'
+    : microphoneWaitsForCharacter() ? '正在准备语音…'
     : state.voicePhase === 'recording' ? '正在听你说'
     : '麦克风已开 · 随时说话';
   if (voiceStatus.textContent !== text) voiceStatus.textContent = text;
@@ -780,7 +785,7 @@ function syncVoiceStatus() {
   voiceStatus.dataset.uiQuiet = String(Boolean(state.sceneStarted
     && !state.micFailure && !state.voiceConnectionPaused && !state.micMuted
     && state.handsFreeListening && state.duplexReady
-    && !microphoneWaitsForCharacter() && state.voicePhase !== 'recording'));
+    && !microphoneWaitsForCharacter() && !state.awaitingModelReply && state.voicePhase !== 'recording'));
   scene.dataset.connectionState = !state.sceneStarted ? 'inactive'
     : state.micFailure || state.voiceConnectionPaused ? 'error'
     : state.duplexReady ? 'ready' : 'connecting';
@@ -1134,6 +1139,7 @@ function finalizeLearnerTranscript(transcript, { turn = state.activeVoiceTurn } 
     if (!state.expectedResponse) beginExpectedResponse('user', { questionId: turn.itemId, turnId: turn.id });
     state.awaitingModelReply = true;
     armReplyTimeout();
+    syncVoiceStatus();
   }
   const resumeTransition = () => {
     if (!resumingTransition || state.stage !== 'task-complete' || state.conversationFocus === 'chat') return;
@@ -1169,44 +1175,17 @@ function stageTransitionUtterance(text, turn, message) {
     questionMatchesTask: normalizedSpeech(turn.context?.question) === normalizedSpeech(nextTask.prompt),
   }));
   if (preview.kind !== 'decision' || !preview.changedTaskIds.length) return false;
-  stopSpeechPlayback();
-  state.pendingTransitionUtterance = {
-    practiceSession: state.practiceSession,
-    taskId: nextTask.id,
-    taskIndex: nextTaskIndex,
-    messageId: message.id,
-    question: turn.context?.question,
-    text: String(text || '').trim(),
-  };
-  message.status = '已听到 · 下一步出现后确认';
+  // The character may already have asked the next question while the task
+  // badge is still dwelling on its completed step. Move the task beneath the
+  // existing answer/response instead of canceling that natural conversation.
+  const expected = state.expectedResponse;
+  if (expected?.turnId === turn.id) expected.taskId = nextTask.id;
+  startTask(nextTaskIndex, { speakAgain: false, preserveConversation: true });
+  turn.context = { ...turn.context, taskId: nextTask.id, taskIndex: nextTaskIndex };
+  message.taskId = nextTask.id;
+  message.status = '已听到';
   renderDialogue();
-  state.conversationFocus = 'task';
-  scheduleTaskAdvance(nextTaskIndex);
-  return true;
-}
-
-function consumeTransitionUtterance() {
-  const pending = state.pendingTransitionUtterance;
-  if (!pending || pending.practiceSession !== state.practiceSession || state.stage !== 'active'
-    || pending.taskIndex !== state.taskIndex || pending.taskId !== currentTask().id) return false;
-  state.pendingTransitionUtterance = null;
-  const message = state.dialogueHistory.find(item => item.id === pending.messageId);
-  if (!message || message.text !== pending.text) return false;
-  message.taskId = currentTask().id;
-  message.revision = Math.max(1, Number(message.revision) || 1) + 1;
-  message.status = '已接到下一步 · 正在确认';
-  renderDialogue();
-  const context = {
-    ...captureUserTurnContext(),
-    question: pending.question || state.activeQuestion,
-    messageId: message.id,
-    revision: message.revision,
-    answer: message.text,
-    final: true,
-    source: 'voice',
-  };
-  requestLanguageFeedback(context.question, message.text, context);
-  return true;
+  return false;
 }
 
 function beginLocalSpeechTurn({ contextOverride = null } = {}) {
@@ -1492,9 +1471,18 @@ function clearCharacterCaptionReveal({ complete = false } = {}) {
   state.captionAudioStart = 0; state.streamingLumaIndex = null;
 }
 
-function beginCharacterCaptionReveal(text) {
+function beginCharacterCaptionReveal(text, { append = false } = {}) {
   const clean = String(text || '').trim();
   if (!clean) return;
+  const streaming = state.dialogueHistory[state.streamingLumaIndex];
+  if (append && streaming?.speaker === 'luma' && state.captionCharacters.length) {
+    // Streaming text expands this response; it must not create another bubble
+    // or reset the audio clock and already revealed words on every sentence.
+    streaming.updatesQuestion = setCharacterLineContext(clean) || streaming.updatesQuestion;
+    state.captionCharacters = Array.from(clean);
+    globalThis.LumaVisuals?.speech(clean);
+    return;
+  }
   clearCharacterCaptionReveal();
   const updatesQuestion = setCharacterLineContext(clean);
   globalThis.LumaVisuals?.speech(clean);
@@ -2132,6 +2120,24 @@ function armCharacterTurnWatchdog(delayMs = 1000) {
       }
     }
     const quietFor = now - state.lastDuplexAudioAt;
+    const owner = state.expectedResponse;
+    const audioDrainedFor = (playbackTime - state.duplexNextPlayTime) * 1000;
+    if (owner && state.captionAudioStart > 0 && state.duplexSubtitleReady && !playbackActive
+      && !learnerDecisionPending()) {
+      // A few provider turns never send either terminal event. Once real PCM
+      // has finished, allow a short gap for the next packet before releasing
+      // the floor normally. Measure from playback end, not packet arrival: a
+      // large queued buffer can still be speaking long after its arrival.
+      const textQuietFor = now - (owner.lastTextAt || state.lastDuplexAudioAt);
+      if (Math.min(quietFor, textQuietFor, audioDrainedFor) >= CHARACTER_DRAIN_GRACE_MS) {
+        publishDuplexDraft({ complete: true });
+        if (state.expectedResponse !== owner) return;
+        state.duplexOutputDone = true;
+        finishDuplexAudioOutput();
+        return;
+      }
+      if (quietFor < CHARACTER_AUDIO_QUIET_MS) { armCharacterTurnWatchdog(250); return; }
+    }
     if (quietFor < CHARACTER_AUDIO_QUIET_MS || playbackActive) { armCharacterTurnWatchdog(1000); return; }
     const taskDone = settleFailedDuplexTurn();
     showToast(taskDone ? '回答已确认，已继续下一步。' : '声音没有播出来，问题已显示，可以直接回答。');
@@ -2338,6 +2344,8 @@ async function enqueueDuplexPcm(base64, generation = state.playbackGeneration) {
   state.duplexNextPlayTime = startAt + buffer.duration; state.duplexSources.add(source);
   source.onended = () => { state.duplexSources.delete(source); };
   source.start(startAt);
+  state.awaitingModelReply = false;
+  syncVoiceStatus();
 }
 
 function unlockDuplexPlayback() {
@@ -2352,6 +2360,8 @@ function unlockDuplexPlayback() {
 function queueDuplexAudio(audio) {
   if (!audio) return;
   globalThis.LumaWordAudio?.stop();
+  state.awaitingModelReply = false;
+  syncVoiceStatus();
   const generation = state.playbackGeneration;
   scene.dataset.audioChunks = String(Number(scene.dataset.audioChunks || 0) + 1);
   state.duplexAudioQueue = state.duplexAudioQueue.then(() => enqueueDuplexPcm(audio, generation)).catch(() => {
@@ -2388,6 +2398,7 @@ function publishDuplexSubtitle() {
     return true;
   }
   if (!state.duplexSpeaking) return false;
+  const append = Boolean(state.expectedResponse?.publishedText);
   if (state.expectedResponse) state.expectedResponse.publishedText = reply;
   state.duplexPendingSubtitle = '';
   if (state.pendingPostActionQuestion && state.actionDone && !state.speechDone && /\?\s*$/.test(reply)) {
@@ -2397,10 +2408,25 @@ function publishDuplexSubtitle() {
   }
   if (state.stage === 'active' && (state.duplexResponseIsPrompt || !state.characterPromptDelivered)) state.characterPromptDelivered = true;
   globalThis.LumaExperience?.noteCharacterLine(reply);
-  beginCharacterCaptionReveal(reply);
+  beginCharacterCaptionReveal(reply, { append });
   releaseDuplexAudioGate();
   finishDuplexAudioOutput();
   return true;
+}
+
+function publishDuplexDraft({ complete = false } = {}) {
+  if (!state.expectedResponse || state.expectedResponse.kind === 'say' || state.suppressDuplexResponse) return false;
+  const draft = state.duplexResponseText.trim();
+  if (!draft) return false;
+  if (looksLikeReasoningLeak(draft)) { discardReasoningLeak(); return false; }
+  const end = [...draft.matchAll(/[.!?。！？](?=\s|$)/gu)].at(-1)?.index;
+  if (!complete && end === undefined) return false;
+  const ready = complete ? draft : draft.slice(0, end + 1).trim();
+  if (asksForCompletedAction(ready)) { discardReasoningLeak(safeCharacterReply()); return false; }
+  if (!resolveLearnerBeforeReply()) return false;
+  state.duplexValidatedText = true;
+  state.duplexPendingSubtitle = ready;
+  return publishDuplexSubtitle();
 }
 
 async function finishDuplexAudioOutput() {
@@ -2539,6 +2565,7 @@ function connectDuplexSession() {
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
   const socket = new WebSocket(`${scheme}://${location.host}/api/duplex`);
   state.duplexSocket = socket;
+  state.duplexInputMuted = null;
   const promise = new Promise((resolve, reject) => {
     state.duplexConnectResolve = resolve; state.duplexConnectReject = reject;
   });
@@ -2579,7 +2606,9 @@ function connectDuplexSession() {
     // recognition/response together; never cancel the line being heard.
     const responseId = responseEventId(event);
     const questionId = responseQuestionId(event);
-    const nextResponse = event.type.startsWith('response.output_')
+    const responseEvent = event.type.startsWith('response.output_')
+      || ['response.done', 'response.canceled', 'response.cancelled'].includes(event.type);
+    const nextResponse = responseEvent
       && ((responseId && state.expectedResponse?.responseId && responseId !== state.expectedResponse.responseId)
         || (questionId && state.expectedResponse?.questionId && questionId !== state.expectedResponse.questionId));
     const knownTurn = transcriptLedger.items.get(transcriptItemId(event));
@@ -2606,7 +2635,7 @@ function connectDuplexSession() {
     }
     if (event.type === 'conversation.item.input_audio_transcription.started') {
       const turn = acceptTranscriptEvent(event, { allowStart: true });
-      if (turn) armVoiceTurnWatchdog();
+      if (turn && !turn.finalizeTimer) armVoiceTurnWatchdog(turn);
       return;
     }
     if (event.type === 'conversation.item.input_audio_transcription.delta'
@@ -2616,9 +2645,12 @@ function connectDuplexSession() {
       if (!turn || !VoiceRuntime.isSpeechText(text)) return;
       confirmLearnerTurn(turn, text);
       if (!turn.confirmed) return;
+      const previousText = turn.text;
       updateLearnerTurn(turn, text);
       if (state.activeVoiceTurn === turn) state.duplexTranscript = text;
-      armVoiceTurnWatchdog(turn);
+      // A repeated hypothesis is not new speech and cannot postpone the
+      // missing-final fallback indefinitely.
+      if (turn.text !== previousText || !turn.finalizeTimer) armVoiceTurnWatchdog(turn);
       return;
     }
     if (event.type === 'conversation.item.input_audio_transcription.completed') {
@@ -2634,10 +2666,16 @@ function connectDuplexSession() {
     if (event.type === 'response.output_text.delta') {
       if (!acceptResponseEvent(event) || state.suppressDuplexResponse) return;
       state.duplexResponseText += extractDuplexText(event);
+      state.expectedResponse.lastTextAt = Date.now();
+      // Some realtime responses stream all text/audio but omit text.done.
+      // Validate complete sentences as they arrive instead of making the first
+      // audible packet wait for a terminal event that may never be sent.
+      publishDuplexDraft();
       return;
     }
     if (event.type === 'response.output_text.done') {
       if (!acceptResponseEvent(event) || state.suppressDuplexResponse) return;
+      state.expectedResponse.lastTextAt = Date.now();
       if (!resolveLearnerBeforeReply()) return;
       const reply = (extractDuplexText(event) || state.duplexResponseText).trim();
       state.duplexResponseText = '';
@@ -2666,6 +2704,7 @@ function connectDuplexSession() {
       if (!isConversationPlaybackActive()) stopDuplexPlayback({ cancel: false });
       else { clearTimeout(state.duplexFinishTimer); state.duplexFinishTimer = null; }
       state.duplexSpeaking = true; setVoicePhase('character');
+      setDuplexInputMuted(true);
       state.lumaStartedAt = Date.now(); state.lastDuplexAudioAt = state.lumaStartedAt;
       state.duplexClockTime = Number(state.duplexPlayerContext?.currentTime) || 0;
       state.duplexClockAdvancedAt = state.lumaStartedAt;
@@ -2691,6 +2730,9 @@ function connectDuplexSession() {
     // signal so the character turn cannot hold the lesson indefinitely.
     if (event.type === 'response.output_audio.done' || event.type === 'response.done') {
       if (!acceptResponseEvent(event)) return;
+      const owner = state.expectedResponse;
+      publishDuplexDraft({ complete: true });
+      if (state.expectedResponse !== owner) return;
       if (!state.expectedResponse?.audioStarted) {
         if (learnerDecisionPending()) { state.expectedResponse.textOnlyDone = true; return; }
         const text = state.duplexValidatedText ? state.duplexPendingSubtitle : '';
@@ -2702,9 +2744,20 @@ function connectDuplexSession() {
       if (state.duplexOutputDone) return;
       clearCharacterTurnWatchdog(); state.duplexOutputDone = true;
       if (!state.duplexSubtitleReady) {
-        state.duplexAudioGateTimer = setTimeout(() => {
-          if (current() && !state.duplexSubtitleReady) settleFailedDuplexTurn();
-        }, 4000);
+        const owner = state.expectedResponse, gateStartedAt = Date.now();
+        const waitForSubtitle = () => {
+          state.duplexAudioGateTimer = null;
+          if (!current() || state.expectedResponse !== owner || state.duplexSubtitleReady) return;
+          // Semantic feedback has its own 6.5s deadline. Do not throw away a
+          // complete, buffered reply after only 4s while that check is validly
+          // pending. A hard bound still releases any unexpectedly stuck gate.
+          if (learnerDecisionPending() && Date.now() - gateStartedAt < 8000) {
+            state.duplexAudioGateTimer = setTimeout(waitForSubtitle, 250);
+            return;
+          }
+          settleFailedDuplexTurn();
+        };
+        state.duplexAudioGateTimer = setTimeout(waitForSubtitle, 4000);
       } else finishDuplexAudioOutput();
       return;
     }
@@ -3093,7 +3146,7 @@ function showPendingTaskPrompt(line = currentTask().prompt, { updatesQuestion = 
   renderDialogue();
 }
 
-function startTask(index, { speakAgain = true } = {}) {
+function startTask(index, { speakAgain = true, preserveConversation = false } = {}) {
   globalThis.LumaWords?.close?.({ restoreFocus: false, resume: false });
   state.conversationFocus = 'task';
   appShell.scrollTop = 0;
@@ -3108,13 +3161,10 @@ function startTask(index, { speakAgain = true } = {}) {
   state.postActionQuestionTimer = null;
   state.pendingPostActionQuestion = false;
   clearLocalSpeechTurn();
-  stopSpeechPlayback();
+  if (!preserveConversation) stopSpeechPlayback();
   state.taskIndex = index;
   state.breakfastHelp = false; state.breakfastCupSelected = false;
   const task = currentTask();
-  const hasTransitionUtterance = state.pendingTransitionUtterance?.practiceSession === state.practiceSession
-    && state.pendingTransitionUtterance.taskIndex === index
-    && state.pendingTransitionUtterance.taskId === task.id;
   state.stage = 'active';
   state.dragging = false;
   state.actionDone = !taskHasAction(task) || Boolean(state.sessionGoals[task.id]?.acted);
@@ -3127,14 +3177,16 @@ function startTask(index, { speakAgain = true } = {}) {
   state.streamingUserIndex = null;
   setVoicePhase(speakAgain ? 'character' : 'idle');
   state.pendingTaskUpdate = false;
-  state.awaitingModelReply = false;
+  if (!preserveConversation) state.awaitingModelReply = false;
   state.userTurnActive = false;
-  state.duplexResponseText = '';
-  state.duplexPendingSubtitle = '';
-  state.duplexValidatedText = false;
-  state.duplexResponseIsPrompt = false;
+  if (!preserveConversation) {
+    state.duplexResponseText = '';
+    state.duplexPendingSubtitle = '';
+    state.duplexValidatedText = false;
+    state.duplexResponseIsPrompt = false;
+    retireExpectedResponse();
+  }
   state.safeVoiceRetries = 0;
-  retireExpectedResponse();
   state.lastFinalizedUser = null;
   scene.dataset.audioChunks = '0';
   scene.dataset.micFrames = '0';
@@ -3143,7 +3195,7 @@ function startTask(index, { speakAgain = true } = {}) {
   scene.dataset.micThreshold = '0.0040';
   delete scene.dataset.voiceRecovery;
   delete scene.dataset.lastBargeInAt;
-  state.characterPromptDelivered = false;
+  state.characterPromptDelivered = preserveConversation;
   state.suppressDuplexResponse = false;
   state.idleNudgeCount = 0;
   state.actionCoachRevealed = false;
@@ -3170,9 +3222,11 @@ function startTask(index, { speakAgain = true } = {}) {
   renderBreakfast();
   globalThis.LumaVisuals?.render();
   setApplePosition(state.initialApple, true);
-  state.currentSpeech = '';
-  state.activeQuestion = '';
-  state.lastHeardQuestion = '';
+  if (!preserveConversation) {
+    state.currentSpeech = '';
+    state.activeQuestion = '';
+    state.lastHeardQuestion = '';
+  }
   state.nudgeInFlight = false;
   scene.classList.toggle('show-translation', preferences.rescue === '始终显示');
   if (!state.dialogueHistory.length) languagePanel.hidden = true;
@@ -3180,23 +3234,14 @@ function startTask(index, { speakAgain = true } = {}) {
   state.awaitingPrompt = false;
   if (state.duplexReady) updateDuplexTask({ force: true });
   else connectDuplexSession().catch(() => {});
-  state.awaitingPrompt = Boolean(speakAgain && !hasTransitionUtterance);
+  state.awaitingPrompt = Boolean(speakAgain);
   if (speakAgain) {
     const returnGreeting = task.id === 'coffee-order' && state.coffeeMissionId === 'C01'
       ? globalThis.LumaSceneMemory?.returnGreeting(state.previousVisit) : '';
     const opening = state.dialogueHistory.length === 0
       ? returnGreeting || DialogueRules.openingLine(task.id, task.prompt) : task.prompt;
-    if (hasTransitionUtterance) {
-      // Process the answer already heard before presenting another question.
-      // It may change the drink or fill this step, making the old prompt wrong.
-      state.promptTimer = setTimeout(() => {
-        state.promptTimer = null;
-        consumeTransitionUtterance();
-      }, 180);
-    } else {
-      showPendingTaskPrompt(opening);
-      scheduleTaskPrompt(task.id, state.duplexReady ? 180 : 2600);
-    }
+    showPendingTaskPrompt(opening);
+    scheduleTaskPrompt(task.id, state.duplexReady ? 180 : 2600);
   }
   globalThis.LumaExperience?.taskStarted();
   ensureSceneVoiceIsOpen();
@@ -3209,7 +3254,6 @@ function resetScene({ speakAgain = true, resumeCheckpoint = null, startTaskIndex
     && resumeCheckpoint.sceneId === state.selectedScene;
   if (state.sessionScope === 'target-practice') reviewTaskId ||= state.reviewTaskId;
   state.practiceSession += 1;
-  state.pendingTransitionUtterance = null;
   state.pendingFeedback.forEach(controller => controller.abort());
   state.pendingFeedback.clear();
   transcriptLedger.reset();
@@ -3367,7 +3411,6 @@ function leaveScene({ keepVoice = false } = {}) {
   clearTimeout(state.postActionQuestionTimer);
   state.postActionQuestionTimer = null;
   state.pendingPostActionQuestion = false;
-  state.pendingTransitionUtterance = null;
   clearLocalSpeechTurn();
   stopSpeechPlayback();
   cancelSpeechCapture();
@@ -3729,6 +3772,8 @@ function cleanupSpeechCaptureUi() {
 }
 
 function disconnectAudioCapture() {
+  setDuplexInputMuted(true);
+  state.microphonePreroll = new Int16Array(0); state.lastHeldSpeechAt = 0;
   if (state.audioProcessor?.port) state.audioProcessor.port.onmessage = null;
   if (state.audioProcessor) state.audioProcessor.onaudioprocess = null;
   for (const node of [state.audioSource, state.audioFilter, state.audioProcessor, state.audioSink]) {
@@ -3760,6 +3805,40 @@ function microphoneWaitsForCharacter() {
   return state.awaitingPrompt || state.duplexSpeaking || state.duplexAcceptAudio || isConversationPlaybackActive();
 }
 
+function setDuplexInputMuted(muted) {
+  if (!state.duplexReady || state.duplexSocket?.readyState !== WebSocket.OPEN || state.duplexInputMuted === muted) return;
+  sendDuplex({ type: muted ? 'input_audio_mute.commit' : 'input_audio_unmute.commit' });
+  state.duplexInputMuted = muted;
+}
+
+function bufferMicrophonePcm(pcm, rms) {
+  if (!microphoneWaitsForCharacter()) {
+    const prior = state.microphonePreroll;
+    state.microphonePreroll = new Int16Array(0); state.lastHeldSpeechAt = 0;
+    if (prior.length && !microphoneBuffer.push(prior)) return false;
+    return microphoneBuffer.push(pcm);
+  }
+  // Preserve even very quiet overlap, with 200 ms before speech and a full
+  // second after it for ASR. Long near-silent character playback must not be
+  // replayed into the service in real time before the learner's next words.
+  if (rms > .001) state.lastHeldSpeechAt = Date.now();
+  if (rms <= .001 && Date.now() - state.lastHeldSpeechAt > 1000) {
+    const prior = state.microphonePreroll;
+    const keep = Math.min(3200, prior.length + pcm.length);
+    const tail = new Int16Array(keep);
+    const fromCurrent = Math.min(keep, pcm.length), fromPrior = keep - fromCurrent;
+    if (fromPrior) tail.set(prior.subarray(prior.length - fromPrior));
+    tail.set(pcm.subarray(pcm.length - fromCurrent), fromPrior);
+    state.microphonePreroll = tail;
+    return true;
+  }
+  if (state.microphonePreroll.length) {
+    const prior = state.microphonePreroll; state.microphonePreroll = new Int16Array(0);
+    if (!microphoneBuffer.push(prior)) return false;
+  }
+  return microphoneBuffer.push(pcm);
+}
+
 function flushDeferredVoiceEvents() {
   const socket = state.duplexSocket;
   if (!socket || microphoneWaitsForCharacter()) return;
@@ -3773,6 +3852,7 @@ function flushDeferredVoiceEvents() {
 
 function flushMicrophoneBuffer() {
   if (globalThis.LumaWordAudio?.isCaptureBlocked()) {
+    setDuplexInputMuted(true);
     clearWordAudioCapture();
     return;
   }
@@ -3780,12 +3860,13 @@ function flushMicrophoneBuffer() {
   // Non-interrupting conversations: capture continuously, but give the voice
   // service the buffered PCM only after the current audible line finishes.
   // This delays overlapping speech's transcript by the remaining line length.
-  if (microphoneWaitsForCharacter()) return;
+  if (microphoneWaitsForCharacter()) { setDuplexInputMuted(true); return; }
   flushDeferredVoiceEvents();
-  if (microphoneWaitsForCharacter()) return;
+  if (microphoneWaitsForCharacter()) { setDuplexInputMuted(true); return; }
   const socket = state.duplexSocket;
   if (!state.duplexReady || socket?.readyState !== WebSocket.OPEN || socket.bufferedAmount > 64000) return;
   for (const pcm of microphoneBuffer.take()) {
+    setDuplexInputMuted(false);
     socket.send(pcm.buffer);
     scene.dataset.micPackets = String(Number(scene.dataset.micPackets || 0) + 1);
   }
@@ -3856,7 +3937,7 @@ async function startHandsFreeListening() {
       state.lastMicFrameAt = Date.now();
       // Local dictionary audio is neither an answer nor buffered speech.
       // Keep the live microphone permission/state intact while dropping echo.
-      if (globalThis.LumaWordAudio?.isCaptureBlocked()) return;
+      if (globalThis.LumaWordAudio?.isCaptureBlocked()) { setDuplexInputMuted(true); return; }
       let sum = 0;
       for (const sample of input) sum += sample * sample;
       const rms = Math.sqrt(sum / Math.max(1, input.length));
@@ -3871,7 +3952,7 @@ async function startHandsFreeListening() {
       const pcm = resampler.push(input);
       if (!pcm.length) return;
       if (state.bufferOverflow) { flushMicrophoneBuffer(); return; }
-      if (!microphoneBuffer.push(pcm)) {
+      if (!bufferMicrophonePcm(pcm, rms)) {
         state.bufferOverflow = true;
         showToast('连接中断太久，这段声音未发完。请等连接恢复后再说一次。', 4500);
         syncVoiceStatus(); return;
@@ -4090,7 +4171,9 @@ function resumeLearningGuidance() {
 }
 
 function clearWordAudioCapture() {
+  setDuplexInputMuted(true);
   microphoneBuffer.clear();
+  state.microphonePreroll = new Int16Array(0); state.lastHeldSpeechAt = 0;
   state.bufferOverflow = false;
   scene.dataset.micBufferedMs = '0';
 }

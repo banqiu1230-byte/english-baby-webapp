@@ -43,7 +43,7 @@ function transitionHarness() {
   goal('coffee-order').meaningAccepted = true;
   h.load('coffeeTaskForChangedField', 'recordCoffeeMissionEvidence', 'commitCoffeeChoice',
     'applyDynamicFeedback', 'requestLanguageFeedback', 'latestFollowupText', 'scheduleTaskAdvance',
-    'clearReviewTransition', 'scheduleReview', 'consumeTransitionUtterance', 'taskHasAction',
+    'clearReviewTransition', 'scheduleReview', 'taskHasAction',
     'startTask', 'scheduleTaskPrompt', 'taskRequirementsMet', 'completeMultimodalTask', 'safeCharacterReply');
   return h;
 }
@@ -65,7 +65,6 @@ test(`changing a confirmed drink during its acknowledgment accepts ${JSON.string
   assert.equal(h.s.taskIndex, 1);
   assert.equal(h.s.stage, 'active');
   assert.equal(h.s.conversationFocus, 'task');
-  assert.equal(h.s.pendingTransitionUtterance, null);
   assert.equal(h.s.dialogueHistory.find(item => item.speaker === 'user').status, '已确认');
   assert.match(h.effects.find(item => item.type === 'spoken').text, /latte.*small.*large.*latte/i);
   assert.equal(h.s.dialogueHistory.some(item => /small.*large.*americano/i.test(item.text)), false,
@@ -119,7 +118,6 @@ test('preferences and ordinary chat during a transition neither change the order
     assert.equal(h.s.coffee.size, null, text);
     assert.equal(h.s.conversationFocus, 'task', text);
     assert.equal(h.s.taskIndex, 0, text);
-    assert.equal(h.s.pendingTransitionUtterance, null, text);
     assert.equal(h.effects.some(item => item.type === 'evidence' || item.type === 'spoken'), false, text);
   }
 });
@@ -127,12 +125,14 @@ test('preferences and ordinary chat during a transition neither change the order
 test('one transition answer can correct a drink and supply the remaining order without repeating either question', async () => {
   const h = transitionHarness();
   say(h, 'Actually, a large latte for here, please.');
+  assert.equal(h.s.expectedResponse?.kind, 'user', 'a compound answer retains its natural confirmation turn');
+  h.c.showUnplayedCharacterLine('A large latte for here, got it.');
+  h.c.settleFailedDuplexTurn();
   await h.advance(3800);
   assert.equal(h.s.coffee.drink, 'latte');
   assert.equal(h.s.coffee.size, 'large');
   assert.equal(h.s.coffee.service, 'here');
   assert.equal(h.s.taskIndex, 3);
   assert.equal(h.s.stage, 'active');
-  assert.equal(h.s.pendingTransitionUtterance, null);
   assert.equal(h.s.dialogueHistory.some(item => /small.*large|for here or to go/i.test(item.text)), false);
 });

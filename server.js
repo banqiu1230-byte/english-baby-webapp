@@ -417,11 +417,17 @@ function duplexInstructions(taskId, actionDone = false, speechDone = false, cove
 
 function attachDuplexProxy(client) {
   const debugId = crypto.randomUUID().slice(0, 6);
-  console.log(`[duplex:${debugId}] browser connected`);
+  const connectedAt = Date.now();
+  const trace = (event, timings = {}) => console.log(`${new Date().toISOString()} [duplex:${debugId}] ${event} ${JSON.stringify({ elapsed_ms: Date.now() - connectedAt, ...timings })}`);
+  trace('browser.connected');
   let upstream = null;
   let ready = false;
   let pcmPending = Buffer.alloc(0);
   let audioPumpTimer = null;
+  let readyTimer = null, audioBlockedAt = null;
+  let inputMuted = true, upstreamInputMuted = null, nextAudioAt = null;
+  let responseRequestedAt = null, audioStartedAt = null, firstAudioLogged = false;
+  const READY_TIMEOUT_MS = 10000, AUDIO_STALL_MS = 8000;
   // Match the browser's capture queue while a character line is playing.
   const maxPendingAudioBytes = 16000 * 2 * 60;
   let taskId = 'apple';
@@ -452,8 +458,13 @@ function attachDuplexProxy(client) {
     upstream = null;
     ready = false;
     clearTimeout(audioPumpTimer);
+    clearTimeout(readyTimer);
     audioPumpTimer = null;
+    readyTimer = null; audioBlockedAt = null;
+    inputMuted = true; upstreamInputMuted = null; nextAudioAt = null;
     pcmPending = Buffer.alloc(0);
+    responseContext = { responseId: '', questionId: '' };
+    responseRequestedAt = null; audioStartedAt = null; firstAudioLogged = false;
     if (closing?.readyState === WebSocket.OPEN) {
       try { closing.send(JSON.stringify({ type: 'session.close' })); } catch {}
       setTimeout(() => { try { closing.close(); } catch {} }, 300).unref?.();
@@ -462,12 +473,39 @@ function attachDuplexProxy(client) {
       try { closing?.terminate(); } catch {}
     }
   };
+  const failTransport = message => {
+    trace(message);
+    sendClient({ type: 'local.error', message });
+    closeUpstream();
+  };
+  const syncInputMute = () => {
+    if (!ready || upstream?.readyState !== WebSocket.OPEN) return;
+    // Let already captured speech drain before declaring the input muted.
+    const muted = inputMuted && pcmPending.length === 0;
+    if (upstreamInputMuted === muted) return;
+    upstreamInputMuted = muted;
+    const type = muted ? 'input_audio_mute.commit' : 'input_audio_unmute.commit';
+    sendUpstream({ type, event_id: crypto.randomUUID() });
+    trace(type);
+  };
   const pumpAudio = () => {
     if (!ready || upstream?.readyState !== WebSocket.OPEN || audioPumpTimer !== null) return;
-    // Forward captured time, not one frame per wall-clock timer callback.
-    // Draining a reconnect burst prevents latency accumulating after jitter.
-    while (pcmPending.length) {
+    // Seeduplex requires realtime pacing: 640 bytes = 20 ms of 16 kHz PCM.
+    // Never burst a captured backlog into a faster-than-realtime stream.
+    // https://docs.volcengine.com/docs/DoubaoVoice/access-mustread?lang=zh
+    if (pcmPending.length >= 640 || (inputMuted && pcmPending.length)) {
+      const delay = nextAudioAt == null ? 0 : Math.max(0, nextAudioAt - Date.now());
+      if (delay) {
+        audioPumpTimer = setTimeout(() => { audioPumpTimer = null; pumpAudio(); }, delay);
+        audioPumpTimer.unref?.();
+        return;
+      }
       if (upstream?.bufferedAmount > 512000) {
+        audioBlockedAt ??= Date.now();
+        if (Date.now() - audioBlockedAt >= AUDIO_STALL_MS) {
+          failTransport('audio_transport_stalled');
+          return;
+        }
         // A playback/reconnect burst can fill the socket temporarily. Keep
         // its remaining PCM in order and resume without losing the session.
         audioPumpTimer = setTimeout(() => {
@@ -477,11 +515,22 @@ function attachDuplexProxy(client) {
         audioPumpTimer.unref?.();
         return;
       }
-      const size = Math.min(3200, pcmPending.length);
-      const frame = pcmPending.subarray(0, size);
+      audioBlockedAt = null;
+      syncInputMute();
+      const size = Math.min(640, pcmPending.length);
+      const frame = Buffer.alloc(640);
+      pcmPending.copy(frame, 0, 0, size);
       pcmPending = pcmPending.subarray(size);
       sendUpstream({ type: 'input_audio_buffer.append', event_id: crypto.randomUUID(), audio: frame.toString('base64') });
+      // Anchor to the audio deadline so small timer delays do not accumulate
+      // into seconds of latency. A long suspension rebases without a burst.
+      nextAudioAt = Math.max(nextAudioAt ?? Date.now(), Date.now() - 10) + 20;
+      if (pcmPending.length >= 640 || (inputMuted && pcmPending.length)) {
+        audioPumpTimer = setTimeout(() => { audioPumpTimer = null; pumpAudio(); }, Math.max(1, nextAudioAt - Date.now()));
+        audioPumpTimer.unref?.();
+      }
     }
+    syncInputMute();
   };
   const createSession = () => {
     const apiKey = process.env.DOUBAO_API_KEY;
@@ -490,9 +539,11 @@ function attachDuplexProxy(client) {
       headers: { 'X-Api-Key': apiKey, 'X-Api-Connect-Id': crypto.randomUUID() },
     });
     upstream = connection;
+    readyTimer = setTimeout(() => { if (upstream === connection && !ready) failTransport('duplex_ready_timeout'); }, READY_TIMEOUT_MS);
+    readyTimer.unref?.();
     connection.on('open', () => {
       if (upstream !== connection) return;
-      console.log(`[duplex:${debugId}] upstream connected`);
+      trace('upstream.open');
       sendUpstream({
         type: 'session.create',
         session: {
@@ -516,40 +567,76 @@ function attachDuplexProxy(client) {
       if (upstream !== connection) return;
       let event;
       try { event = JSON.parse(data.toString()); } catch { return; }
-      if (event.response_id || event.question_id) {
+      if (!event || typeof event.type !== 'string') return;
+      const responseId = String(event.response_id || event.response?.id || '');
+      const questionId = String(event.question_id || event.response?.question_id || '');
+      // Only the response owns its audio correlation. A concurrent learner's
+      // ASR question id must never relabel the current character's packets.
+      if (event.type === 'response.output_audio.started'
+        || (!responseContext.responseId && event.type?.startsWith('response.output_') && (responseId || questionId))) {
         responseContext = {
-          responseId: String(event.response_id || responseContext.responseId || ''),
-          questionId: String(event.question_id || responseContext.questionId || ''),
+          responseId: responseId || responseContext.responseId,
+          questionId: questionId || (!responseId || responseId === responseContext.responseId ? responseContext.questionId : ''),
         };
+      } else if (event.type.startsWith('response.') && responseId && responseId === responseContext.responseId && questionId) {
+        responseContext.questionId = questionId;
       }
       if (event.type === 'response.output_audio.delta' && responseContext.responseId) {
         event = {
           ...event,
-          response_id: responseContext.responseId,
-          question_id: responseContext.questionId,
+          response_id: responseId || responseContext.responseId,
+          question_id: questionId || (!responseId || responseId === responseContext.responseId ? responseContext.questionId : ''),
         };
       }
       if (event.type === 'error') {
-        const errorDetail = event.error?.message || event.error?.type || '';
-        console.log(`[duplex:${debugId}] ${event.type}${event.error?.code ? ` (${event.error.code})` : ''}${errorDetail ? ` ${errorDetail}` : ''}`);
+        // Provider messages can echo submitted content. Log only the code.
+        trace('provider.error', { code: String(event.error?.code || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40) });
       }
       if (event.type === 'session.created') {
-        console.log(`[duplex:${debugId}] session ready`);
+        clearTimeout(readyTimer); readyTimer = null;
+        trace('session.created');
         ready = true;
         pumpAudio();
       }
+      if (event.type === 'conversation.item.input_audio_transcription.completed') {
+        responseRequestedAt = Date.now();
+        trace('transcription.completed');
+      }
+      if (event.type === 'response.output_audio.started') {
+        audioStartedAt = Date.now(); firstAudioLogged = false;
+        trace('response.output_audio.started', responseRequestedAt == null ? {} : { wait_ms: audioStartedAt - responseRequestedAt });
+      }
+      if (event.type === 'response.output_audio.delta' && !firstAudioLogged) {
+        firstAudioLogged = true;
+        trace('response.first_audio', audioStartedAt == null ? {} : { packet_wait_ms: Date.now() - audioStartedAt });
+      }
       sendClient(event);
       if (event.type === 'response.output_audio.done' || event.type === 'response.done') {
-        responseContext = { responseId: '', questionId: '' };
+        trace(event.type);
+        const matches = responseId ? responseId === responseContext.responseId
+          : questionId ? questionId === responseContext.questionId : true;
+        if (matches) responseContext = { responseId: '', questionId: '' };
+      }
+      if (event.type === 'error' || event.type === 'session.closed') {
+        closeUpstream();
+        if (event.type === 'session.closed') sendClient({ type: 'local.closed' });
       }
     });
-    connection.on('unexpected-response', (_request, response) => { if (upstream === connection) sendClient({ type: 'local.error', message: `duplex_http_${response.statusCode || 0}` }); });
-    connection.on('error', () => { if (upstream === connection) sendClient({ type: 'local.error', message: 'duplex_socket_error' }); });
+    connection.on('unexpected-response', (_request, response) => { if (upstream === connection) failTransport(`duplex_http_${response.statusCode || 0}`); });
+    connection.on('error', () => { if (upstream === connection) failTransport('duplex_socket_error'); });
     connection.on('close', () => {
       if (upstream !== connection) return;
+      upstream = null;
       ready = false;
       clearTimeout(audioPumpTimer);
+      clearTimeout(readyTimer);
       audioPumpTimer = null;
+      readyTimer = null; audioBlockedAt = null;
+      inputMuted = true; upstreamInputMuted = null; nextAudioAt = null;
+      pcmPending = Buffer.alloc(0);
+      responseContext = { responseId: '', questionId: '' };
+      responseRequestedAt = null; audioStartedAt = null; firstAudioLogged = false;
+      trace('upstream.closed');
       sendClient({ type: 'local.closed' });
     });
   };
@@ -561,11 +648,18 @@ function attachDuplexProxy(client) {
         sendClient({ type: 'local.error', message: 'audio_buffer_full' }); closeUpstream(); return;
       }
       pcmPending = pcmPending.length ? Buffer.concat([pcmPending, audio]) : audio;
+      inputMuted = false;
       pumpAudio();
       return;
     }
     let event;
     try { event = JSON.parse(data.toString()); } catch { return; }
+    if (event?.type === 'input_audio_mute.commit' || event?.type === 'input_audio_unmute.commit') {
+      inputMuted = event.type === 'input_audio_mute.commit';
+      pumpAudio();
+      syncInputMute();
+      return;
+    }
     if (event.type === 'start') {
       updateBreakfast(event.breakfast);
       coffee = normalizeCoffeeState(event.coffee);
@@ -611,7 +705,8 @@ function attachDuplexProxy(client) {
       return;
     }
     if (event.type === 'say' && event.text) {
-      console.log(`[duplex:${debugId}] explicit character line requested`);
+      responseRequestedAt = Date.now();
+      trace('speech.requested');
       sendUpstream({ type: 'speech_text_buffer.commit', event_id: crypto.randomUUID(), text: cleanText(event.text, '', 300) });
     }
     if (event.type === 'response.cancel') sendUpstream({ type: 'response.cancel', event_id: crypto.randomUUID() });

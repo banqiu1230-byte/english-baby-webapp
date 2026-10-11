@@ -165,7 +165,7 @@ test('C01: a mid-sentence small hypothesis is not a size choice without an endpo
   assert.equal(h.s.coffee.size, null, 'the learner is still allowed to finish or self-correct');
 });
 
-for (const reply of ['Okay.', 'Small, got it.']) for (const withAudio of [true, false]) test(`C01: async interpretation holds ${JSON.stringify(reply)} (${withAudio ? 'audio' : 'text-only'}) until the meaning is confirmed`, async () => {
+for (const reply of ['Okay.', 'Small, got it.']) for (const withAudio of [true, false]) for (const feedbackDelay of [0, 5000]) test(`C01: async interpretation holds ${JSON.stringify(reply)} (${withAudio ? 'audio' : 'text-only'}, ${feedbackDelay}ms feedback) until the meaning is confirmed`, async () => {
   const h = coffeeHarness(1);
   loadCoffeeProgress(h);
   let resolveFetch;
@@ -178,7 +178,10 @@ for (const reply of ['Okay.', 'Small, got it.']) for (const withAudio of [true, 
     await send({ type: 'response.output_audio.delta', ...provider, audio: 'AAAA' });
   }
   await send({ type: 'response.output_text.done', ...provider, text: reply });
-  if (!withAudio) await send({ type: 'response.done', ...provider });
+  if (withAudio) await send({ type: 'response.output_audio.done', ...provider });
+  else await send({ type: 'response.done', ...provider });
+  await h.advance(feedbackDelay);
+  assert.equal(h.s.expectedResponse?.responseId, provider.response_id, 'received reply must survive while bounded semantic feedback is pending');
   assert.equal(typeof resolveFetch, 'function', 'this utterance must reach asynchronous semantic feedback');
   assert.equal(h.c.learnerDecisionPending(), true);
   assert.equal(h.s.coffee.size, null);
@@ -382,7 +385,6 @@ test('chatting about a favourite coffee does not consume the next size step duri
   h.s.messageSerial = 1;
   const send = await connect(h);
   await send({type:'conversation.item.input_audio_transcription.completed',item_id:'preference',text:'A small latte.'});
-  assert.equal(h.s.pendingTransitionUtterance, null);
   assert.equal(h.s.coffee.drink, 'americano');
   assert.equal(h.s.coffee.size, null);
 });

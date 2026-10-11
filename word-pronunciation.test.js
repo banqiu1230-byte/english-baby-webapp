@@ -134,14 +134,19 @@ test('local pronunciation drops echo PCM, restores capture on failure, and leave
   assert.equal(h.c.microphoneBuffer.bytes, 0);
   h.c.microphoneBuffer.push(new Int16Array([3, 4]));
   h.c.flushMicrophoneBuffer();
-  assert.equal(sent.length, 0);
+  assert.deepEqual(sent.map(value => typeof value === 'string' ? JSON.parse(value).type : 'pcm'),
+    ['input_audio_mute.commit'], 'dictionary audio may mute capture, but must never upload echo PCM or start an ASR turn');
   assert.equal(h.c.microphoneBuffer.bytes, 0);
   utterances[0].onerror();
   assert.equal((await pending).ok, false);
   await h.advance(200);
   h.c.microphoneBuffer.push(new Int16Array([5, 6]));
   h.c.flushMicrophoneBuffer();
-  assert.equal(sent.length, 1);
+  assert.deepEqual(sent.filter(value => typeof value === 'string').map(value => JSON.parse(value).type),
+    ['input_audio_mute.commit', 'input_audio_unmute.commit']);
+  const pcm = sent.filter(value => typeof value !== 'string');
+  assert.equal(pcm.length, 1, 'only the new learner audio is uploaded after pronunciation ends');
+  assert.deepEqual(Array.from(new Int16Array(pcm[0])), [5, 6], 'neither pre-playback nor pronunciation echo survives');
   assert.equal(h.s.micMuted, false);
   assert.equal(h.s.handsFreeListening, true);
   assert.equal(h.s.expectedResponse, null);

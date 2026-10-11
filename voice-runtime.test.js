@@ -32,6 +32,37 @@ test('a completed ASR item cancels its fallback and ignores a duplicate final pa
   assert.equal(h.effects.filter(effect => effect.type === 'feedback').length, 1);
 });
 
+test('repeated identical ASR hypotheses cannot postpone missing-final recovery', async () => {
+  const h = harness();
+  const ready = h.c.connectDuplexSession();
+  const send = event => h.s.duplexSocket.onmessage({ data: JSON.stringify(event) });
+  await send({ type: 'session.created' }); await ready;
+  await send({ type: 'conversation.item.input_audio_transcription.result', item_id: 'repeated', text: 'Milk, please.' });
+  await h.advance(5000);
+  await send({ type: 'conversation.item.input_audio_transcription.started', item_id: 'repeated' });
+  await send({ type: 'conversation.item.input_audio_transcription.result', item_id: 'repeated', text: 'Milk, please.' });
+  await h.advance(1001);
+  assert.equal(h.s.dialogueHistory[0].final, true);
+  assert.equal(h.effects.filter(effect => effect.type === 'feedback').length, 1);
+  await send({ type: 'conversation.item.input_audio_transcription.result', item_id: 'repeated', text: 'Milk, please.' });
+  assert.equal(h.effects.filter(effect => effect.type === 'feedback').length, 1);
+});
+
+test('new ASR words extend the finalization window while the learner is still speaking', async () => {
+  const h = harness();
+  const ready = h.c.connectDuplexSession();
+  const send = event => h.s.duplexSocket.onmessage({ data: JSON.stringify(event) });
+  await send({ type: 'session.created' }); await ready;
+  await send({ type: 'conversation.item.input_audio_transcription.result', item_id: 'growing', text: 'I found' });
+  await h.advance(5000);
+  await send({ type: 'conversation.item.input_audio_transcription.result', item_id: 'growing', text: 'I found the milk.' });
+  await h.advance(1001);
+  assert.equal(h.s.dialogueHistory[0].final, false);
+  await h.advance(5000);
+  assert.equal(h.s.dialogueHistory[0].final, true);
+  assert.equal(h.effects.find(effect => effect.type === 'feedback').answer, 'I found the milk.');
+});
+
 test('a pending ASR fallback cannot submit into a replacement practice or connection', async () => {
   for (const replacement of ['practiceSession', 'connectionGeneration']) {
     const h = harness(), turn = h.c.acceptTranscriptEvent({ item_id: 'old' }, { allowStart: true });
@@ -159,11 +190,13 @@ test('PCM captured during a character line is released intact after playback', (
   const first = new Int16Array([1, 2]), second = new Int16Array([3, 4]);
   h.c.microphoneBuffer.push(first); h.c.flushMicrophoneBuffer();
   h.c.microphoneBuffer.push(second); h.c.flushMicrophoneBuffer();
-  assert.equal(sent.length, 0);
+  assert.deepEqual(sent.map(data => typeof data === 'string' ? JSON.parse(data).type : 'pcm'), ['input_audio_mute.commit']);
   assert.equal(h.c.microphoneBuffer.bytes, 8);
   assert.equal(h.c.sceneVoiceIsOpen(), true);
   h.s.duplexSpeaking = false; h.c.flushMicrophoneBuffer();
-  assert.deepEqual(sent, [first.buffer, second.buffer]);
+  assert.deepEqual(sent.filter(data => typeof data !== 'string'), [first.buffer, second.buffer]);
+  assert.deepEqual(sent.filter(data => typeof data === 'string').map(data => JSON.parse(data).type),
+    ['input_audio_mute.commit', 'input_audio_unmute.commit']);
   assert.equal(h.c.microphoneBuffer.bytes, 0);
 });
 
@@ -586,4 +619,35 @@ test('an already answered question does not add twelve seconds after a failed re
   let next = false; h.c.startTask = () => { next = true; };
   h.c.scheduleTaskAdvance(2); await h.advance(2700);
   assert.equal(next, true);
+});
+
+test('confirmed speech shows reply preparation immediately and clears it on audio, recovery or the next utterance', async () => {
+  const h = harness();
+  h.s.duplexReady = true;
+  const turn = h.c.acceptTranscriptEvent({ item_id: 'waiting-status' }, { allowStart: true });
+  h.c.finalizeLearnerTranscript('Milk, please.', { turn });
+  assert.equal(h.c.voiceStatus.textContent, '听到了，正在回应…');
+  assert.equal(h.c.voiceStatus.dataset.uiQuiet, 'false');
+
+  h.s.duplexSpeaking = true; h.s.duplexAcceptAudio = true;
+  h.c.syncVoiceStatus();
+  assert.equal(h.c.voiceStatus.textContent, '听到了，正在回应…', 'audio.started alone is not audible speech');
+  h.load('queueDuplexAudio');
+  h.c.enqueueDuplexPcm = async () => {};
+  h.c.queueDuplexAudio('AAAA');
+  assert.equal(h.s.awaitingModelReply, false);
+  assert.equal(h.c.voiceStatus.textContent, '正在准备语音…');
+  h.s.duplexPlayerContext = { currentTime: 1 }; h.s.duplexNextPlayTime = 2;
+  h.c.syncVoiceStatus();
+  assert.match(h.c.voiceStatus.textContent, /正在说/);
+
+  h.c.settleFailedDuplexTurn();
+  assert.doesNotMatch(h.c.voiceStatus.textContent, /正在回应|正在说/);
+  const next = h.c.acceptTranscriptEvent({ item_id: 'next-waiting-status' }, { allowStart: true });
+  h.c.finalizeLearnerTranscript('A plate.', { turn: next });
+  assert.equal(h.c.voiceStatus.textContent, '听到了，正在回应…');
+  const correction = h.c.acceptTranscriptEvent({ item_id: 'correct-waiting-status' }, { allowStart: true });
+  h.c.confirmLearnerTurn(correction, 'Actually, milk.');
+  assert.equal(h.c.voiceStatus.textContent, '正在听你说');
+  assert.equal(h.s.awaitingModelReply, false);
 });

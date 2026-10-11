@@ -59,6 +59,7 @@ function harness(overrides = {}) {
     TURN_PHASE: { LISTENING: 'listening', CHARACTER_SPEAKING: 'character-speaking' },
     BARGE_IN_GUARD_MS: 80, CONTINUATION_WINDOW_MS: 1200,
     CHARACTER_AUDIO_QUIET_MS: sourceNumber('CHARACTER_AUDIO_QUIET_MS'),
+    CHARACTER_DRAIN_GRACE_MS: sourceNumber('CHARACTER_DRAIN_GRACE_MS'),
     CHARACTER_CLOCK_STALL_MS: sourceNumber('CHARACTER_CLOCK_STALL_MS'),
     CHARACTER_TURN_MAX_MS: sourceNumber('CHARACTER_TURN_MAX_MS'),
     FINAL_REVIEW_DWELL_MS: sourceNumber('FINAL_REVIEW_DWELL_MS'),
@@ -113,9 +114,10 @@ function harness(overrides = {}) {
     'isConversationPlaybackActive','isConversationTurnPending','scheduledCharacterLineBlocked',
     'clearIdleNudge','clearReviewTransition','clearTaskAdvance','scheduleIdleNudge','sendDuplex','openLearnerTurn','cleanupSpeechCaptureUi',
     'addDialogueMessage','extractDuplexText','setCharacterLineContext','showUnplayedCharacterLine','showPendingTaskPrompt',
+    'publishDuplexDraft','looksLikeReasoningLeak','asksForCompletedAction',
     'armCharacterTurnWatchdog','connectDuplexSession','settleFailedDuplexTurn',
     'stopSpeechPlayback','updateLearnerTurn','confirmLearnerTurn','syncVoiceStatus','flushMicrophoneBuffer',
-    'microphoneWaitsForCharacter','flushDeferredVoiceEvents'];
+    'microphoneWaitsForCharacter','setDuplexInputMuted','bufferMicrophonePcm','flushDeferredVoiceEvents'];
   load(shared);
   return { c: sandbox, s: sandbox.state, task, effects, timers, advance, load, now: () => now };
 }
