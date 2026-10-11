@@ -25,9 +25,17 @@ async function verifyApplication(browser) {
       const geometry = () => page.evaluate(() => {
         const viewport = document.getElementById('worldMapViewport'), canvas = document.getElementById('worldMapCanvas');
         const matrix = new DOMMatrix(getComputedStyle(canvas).transform), bounds = viewport.getBoundingClientRect();
+        const artwork = canvas.querySelector('.world-map-art').getBoundingClientRect();
+        const header = document.querySelector('.world-life-header').getBoundingClientRect();
+        const toolbar = document.querySelector('.world-region-toolbar').getBoundingClientRect();
+        const controls = document.querySelector('.map-controls').getBoundingClientRect();
         const overlap = (a, b) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
           * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
         return { scale: matrix.a, x: matrix.e, y: matrix.f, width: innerWidth, height: innerHeight,
+          headerGap: toolbar.top - header.bottom, controlsTop: controls.top, toolbarTop: toolbar.top,
+          rebounding: viewport.classList.contains('is-rebounding'),
+          artworkFills: artwork.left <= bounds.left && artwork.top <= bounds.top
+            && artwork.right >= bounds.right && artwork.bottom >= bounds.bottom,
           viewport: bounds.toJSON(), overflow: document.documentElement.scrollWidth > innerWidth + 1,
           pins: [...document.querySelectorAll('[data-world-node]')].map(node => {
             const rect = node.getBoundingClientRect(), style = getComputedStyle(node);
@@ -73,7 +81,7 @@ async function verifyApplication(browser) {
               `${width}: ${phase} ${pin.id} ${part}.${dimension} stays at screen size`);
           }
           for (const axis of ['x', 'y']) assert.ok(Math.abs(pin.anchor[axis] - pin.expectedAnchor[axis]) < 1,
-            `${width}: ${phase} ${pin.id} ${axis} anchor follows map without drift`);
+            `${width}: ${phase} ${pin.id} ${axis} anchor follows map without drift (${pin.anchor[axis]} vs ${pin.expectedAnchor[axis]})`);
         }
       };
       await page.screenshot({ path: resolve(output, `world-new-${width}.png`) });
@@ -99,6 +107,8 @@ async function verifyApplication(browser) {
       });
       await page.screenshot({ path: resolve(output, `world-states-${width}.png`) });
       const initial = await geometry();
+      assert.ok(Math.abs(initial.headerGap - 12) < .1, `${width}: region toolbar keeps a 12px gap below the actual stats card`);
+      assert.equal(initial.controlsTop, initial.toolbarTop, `${width}: locate and region controls align`);
       assertFixedMarkers(initial, initial, 'initial default');
       results.push({ width, height, initial, errors });
       writeFileSync(resolve(output, 'results.json'), JSON.stringify(results, null, 2));
@@ -172,6 +182,41 @@ async function verifyApplication(browser) {
       assert.equal(keyboardMinimum.scale, 1, 'Keyboard can return to minimum scale');
       assertFixedMarkers(keyboardMinimum, beforeZoom, 'keyboard minimum');
       await page.screenshot({ path: resolve(output, `world-minimum-${width}.png`) });
+
+      // Real pointer input moves beyond the edge with resistance, then returns without exposing a blank edge.
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      const edge = keyboardMinimum.viewport;
+      const dragFrom = { x: edge.left + 5, y: edge.top + edge.height * .55 };
+      await page.mouse.move(dragFrom.x, dragFrom.y);
+      await page.mouse.down();
+      await page.mouse.move(dragFrom.x + 230, dragFrom.y + 180, { steps: 6 });
+      const stretched = await geometry();
+      assert.ok(stretched.x > 0 && stretched.x < 32 && stretched.y > 0 && stretched.y < 32,
+        `${width}: outward drag is resisted and bounded`);
+      assert.equal(stretched.artworkFills, true, `${width}: overscrolling never reveals empty canvas edges`);
+      assertFixedMarkers(stretched, beforeZoom, 'elastic drag');
+      await page.screenshot({ path: resolve(output, `world-elastic-${width}.png`) });
+      await page.mouse.up();
+      const released = await geometry();
+      assert.equal(released.rebounding, true, `${width}: release starts a return animation`);
+      await page.waitForFunction(() => !document.getElementById('worldMapViewport').classList.contains('is-rebounding'));
+      const settled = await geometry();
+      assert.equal(settled.x, 0); assert.equal(settled.y, 0);
+      assert.equal(settled.artworkFills, true);
+      assert.equal(await page.locator('#sceneSheet').getAttribute('aria-hidden'), 'true', 'Elastic drag does not activate a place');
+
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.mouse.move(edge.right - 5, dragFrom.y);
+      await page.mouse.down();
+      await page.mouse.move(edge.right - 230, dragFrom.y - 180, { steps: 6 });
+      const oppositeEdge = await geometry();
+      assert.ok(oppositeEdge.x < 0 && oppositeEdge.x > -32 && oppositeEdge.y < 0 && oppositeEdge.y > -32);
+      assert.equal(oppositeEdge.artworkFills, true, `${width}: opposite edges retain artwork coverage`);
+      await page.mouse.up();
+      const reduced = await geometry();
+      assert.equal(reduced.x, 0); assert.equal(reduced.y, 0);
+      assert.equal(reduced.rebounding, false, 'Reduced motion returns to bounds immediately');
+      results.at(-1).elastic = { maximumOffset: 32, coveredEdges: true, rebound: true, reducedMotion: true, headerGap: initial.headerGap };
 
       await page.locator('#worldMapViewport').focus();
       await page.keyboard.press('+');

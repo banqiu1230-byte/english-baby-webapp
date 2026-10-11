@@ -2149,7 +2149,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--violet-deep
 .scene-controls .mic-control.is-retry { color: #5f49c9; background: #f2edff; box-shadow: 0 0 0 5px #a38deb20; }
 .scene-controls .mic-control i { font-size: 26px; }
 .scene .voice-status { left: 22px; right: 104px; bottom: calc(var(--scene-dock-bottom) + 87px); color: #fffaf3; font-size: 11px; line-height: 20px; text-shadow: 0 1px 6px #111; }
-.scene .language-panel { left: 18px; right: 18px; bottom: calc(var(--scene-dock-bottom) + 124px); max-height: 146px; padding: 0; overflow: hidden; scrollbar-width: none; text-shadow: none; transition: opacity 160ms ease; }
+.scene .language-panel { left: 18px; right: 18px; bottom: calc(var(--scene-dock-bottom) + 124px); max-height: min(40%, var(--dialogue-space, 40%)); padding: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; pointer-events: auto; scrollbar-width: none; text-shadow: none; transition: opacity 160ms ease; }
 .language-panel::-webkit-scrollbar { display: none; }
 .recent-dialogue { gap: 6px; }
 .dialogue-bubble { max-width: 91%; padding: 0; gap: 4px; border: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; }
@@ -2160,13 +2160,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--violet-deep
 .dialogue-bubble.is-user > small { justify-self: end; color: #88719b; }
 .recent-dialogue .dialogue-bubble { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 2px; max-width: 100%; }
 .recent-dialogue .dialogue-bubble > small { margin: 0; color: #f5ece0; font-weight: 600; line-height: 12px; text-shadow: 0 1px 4px #382510; }
-.recent-dialogue .dialogue-bubble p { display: -webkit-box; padding: 8px 11px; overflow: hidden; border-radius: 14px 14px 14px 4px; -webkit-box-orient: vertical; -webkit-line-clamp: 3; font-size: 15px; line-height: 21px; }
-.recent-dialogue .dialogue-bubble.is-user p { border-radius: 14px 14px 4px 14px; -webkit-line-clamp: 1; }
+.recent-dialogue .dialogue-bubble p { display: block; padding: 8px 11px; overflow: visible; border-radius: 14px 14px 14px 4px; font-size: 15px; line-height: 21px; }
+.recent-dialogue .dialogue-bubble.is-user p { border-radius: 14px 14px 4px 14px; }
 /* Names sit above the message; its receipt sits outside the lower left. */
 .recent-dialogue .transcript-status { justify-self: start; width: 14px; height: 12px; margin-left: 2px; color: #f5f0ff; line-height: 12px; opacity: 1; text-align: center; }
 /* A receipt changing from pending to empty must not move the bottom-anchored
-   bubble. Keep its 12px row plus the 2px grid gap; the 146px band above retains
-   both short turns. Full history still uses native [hidden] behavior. */
+   bubble. Keep its 12px row plus the 2px grid gap. Full history still uses
+   native [hidden] behavior. */
 .recent-dialogue .transcript-status[hidden] { display: block !important; visibility: hidden; }
 .recent-dialogue .transcript-status > span { display: none; }
 .recent-dialogue .transcript-status > i { display: block; font-size: 12px; line-height: 12px; }
@@ -2450,8 +2450,6 @@ html, body, .app-frame, .app-shell, .view, .experience, .scene,
   .scene-task-hud { top: calc(60px + env(safe-area-inset-top)); padding: 6px 10px; }
   .scene-task-hud .order-slots { margin-top: 5px; }
   .scene-task-hud .order-slots > span { padding-block: 2px; }
-  .recent-dialogue .dialogue-bubble p { -webkit-line-clamp: 2; }
-  .recent-dialogue .dialogue-bubble.is-user p { -webkit-line-clamp: 1; }
 }
 
 .mission-result { display: grid; grid-template-columns: 43px minmax(0, 1fr); gap: 13px; margin: 0 0 16px; padding: 17px; border: 1px solid #ddd2e5; border-radius: 20px; background: linear-gradient(145deg, #f7f2fa, #f2eee9); }
@@ -3875,28 +3873,16 @@ html, body { background: #e9e4dd; }
   line-height: 16px;
 }
 
-/* Clamp the unpadded text, not its padded bubble. Clamping the paragraph
-   exposes part of the following line inside its bottom padding in Chrome. */
-.scene .recent-dialogue .dialogue-bubble p {
-  display: block;
-  -webkit-line-clamp: unset;
-}
+/* Caption words are interactive inline buttons. WebKit can ellipsize those
+   buttons inside a line-clamped box, even in the middle of a sentence. Keep
+   every word in normal text flow; only unusually long turns need to scroll. */
 .scene .recent-dialogue .dialogue-text {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-.scene .recent-dialogue .dialogue-bubble.is-user .dialogue-text {
-  -webkit-line-clamp: 1;
-}
-@media (max-height: 600px) and (orientation: portrait) {
-  .scene .recent-dialogue .dialogue-text { -webkit-line-clamp: 2; }
-  .scene .recent-dialogue .dialogue-bubble.is-user .dialogue-text { -webkit-line-clamp: 1; }
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-/* Keep the existing compact scene caption limits and its overflow recovery.
-   At short heights preserve the original cue-label sizing. */
+/* At short heights preserve the original cue-label sizing. */
 @media (max-height: 700px) {
   .scene[data-scene="coffee"] .visual-cue > span {
     font-size: 11px;
@@ -4051,11 +4037,11 @@ html, body { background: #e9e4dd; }
 /* World / learning / profile: life progress is separate from learning evidence. */
 .view-profile.is-active ~ .bottom-nav { visibility: visible; opacity: 1; pointer-events: auto; }
 .bottom-nav button { min-height: 54px; }
-.world-map-viewport { position: absolute; inset: 0; overflow: hidden; touch-action: none; outline-offset: -4px; cursor: grab; }
+.world-map-viewport { position: absolute; inset: 0; overflow: clip; touch-action: none; outline-offset: -4px; cursor: grab; }
 .world-map-viewport.is-dragging { cursor: grabbing; }
 .world-map-canvas { position: absolute; inset: 0; will-change: transform; }
 .world-map-markers { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
-.world-map-canvas .world-map-art { user-select: none; -webkit-user-drag: none; }
+.world-map-canvas .world-map-art { inset: -40px; width: calc(100% + 80px); height: calc(100% + 80px); user-select: none; -webkit-user-drag: none; }
 .life-world-map::before, .life-world-map::after { display: none; }
 progress { appearance: none; display: block; width: 100%; height: 5px; overflow: hidden; border: 0; border-radius: 4px; background: #e9e3f2; }
 progress::-webkit-progress-bar { background: #e9e3f2; border-radius: 4px; }
@@ -4233,7 +4219,7 @@ progress::-moz-progress-bar { background: #8068de; border-radius: 4px; }
 .world-life-level > span > i { font-size:12px;color:#9a8cae; }
 .world-life-level progress { height:4px;margin:0; }
 .world-life-level > small { font-size:10px;line-height:11px;letter-spacing:.1px;font-variant-numeric:tabular-nums;color:#807569; }
-.map-controls { top:calc(max(12px,env(safe-area-inset-top)) + 80px); right:16px; width:44px; padding:0; border-radius:50%; grid-template-columns:1fr; background:#fffcf7; box-shadow:0 3px 14px #3e321c24; z-index:4; }
+.map-controls { top:var(--world-map-toolbar-top,calc(max(12px,env(safe-area-inset-top)) + 84px)); right:16px; width:44px; padding:0; border-radius:50%; grid-template-columns:1fr; background:#fffcf7; box-shadow:0 3px 14px #3e321c24; z-index:4; }
 .map-controls #mapRecenter { border:0; margin:0; width:44px; min-height:44px; font-size:20px; }
 .world-continue { padding:16px 18px 18px; border-radius:24px; background:#fffcf7; box-shadow:0 8px 28px #49392824; }
 .world-continue-meta { min-height:22px; }
@@ -4266,7 +4252,7 @@ progress::-moz-progress-bar { background: #8068de; border-radius: 4px; }
 /* Region navigation shares the map surface; markers stay at screen resolution. */
 .world-map-markers .world-node { --map-x:var(--map-x-regular); --map-y:var(--map-y-regular); }
 .world-map-markers .world-node[hidden] { display:none; }
-.world-region-toolbar { position:absolute;z-index:4;top:calc(max(12px,env(safe-area-inset-top)) + 80px);left:16px;right:72px;display:flex;gap:8px;pointer-events:none; }
+.world-region-toolbar { position:absolute;z-index:4;top:var(--world-map-toolbar-top,calc(max(12px,env(safe-area-inset-top)) + 84px));left:16px;right:72px;display:flex;gap:8px;pointer-events:none; }
 .world-region-toolbar button { display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 12px;border:0;border-radius:16px;background:#fffcf7;color:#514a43;box-shadow:0 3px 14px #3e321c24;cursor:pointer;pointer-events:auto;font-size:12px;font-weight:500;white-space:nowrap; }
 .world-region-toolbar button > i { font-size:16px; }
 .world-region-toolbar #chooseWorldRegion { display:grid;grid-template-columns:minmax(0,1fr) 16px;flex:0 0 104px;width:104px;color:#342d3d; }
@@ -4392,14 +4378,14 @@ progress::-moz-progress-bar { background: #8068de; border-radius: 4px; }
 .learning-help-content .help-meaning { color: var(--ink); font-size: 15px; line-height: 23px; font-weight: 500; }
 .learning-help-content .help-section-label { display: none; }
 .learning-help-content .help-question-meaning, .learning-help-content .help-current-question { margin: 6px 0; color: #8a7b6d; font-size: 11px; line-height: 17px; }
-.learning-help-content .help-answer-starter { margin: 0; color: #4f3f70; font-size: 16px; line-height: 24px; font-weight: 500; }
+.learning-help-content .help-answer-starter { margin: 0; color: var(--ink); font-size: 16px; line-height: 24px; font-weight: 500; }
 .learning-help-content .help-answer-note, .learning-help-content .help-request-status { margin: 7px 0 0; color: #918474; font-size: 10px; line-height: 16px; }
 .learning-help-content details { margin-top: 8px; }
 .learning-help-content summary { min-height: 32px; padding: 5px 0; color: #806a9c; font-size: 11px; cursor: pointer; }
 .help-answer-plan { display: grid; gap: 3px; margin: 0; padding-left: 18px; color: #706252; font-size: 12px; line-height: 19px; }
 .learning-help-content button { min-height: 32px; margin: 5px 0 0; padding: 5px 0; border: 0; border-radius: 0; color: #806a9c; background: transparent; font-size: 11px; text-align: left; }
 #helpAnswerExample { margin: 6px 0; padding: 10px 12px; border-radius: 12px; background: #eee7f5; }
-#helpAnswerExample .help-model-text { margin: 0; color: #4f3f70; font-size: 15px; line-height: 23px; }
+#helpAnswerExample .help-model-text { margin: 0; color: var(--ink); font-size: 15px; line-height: 23px; }
 .learning-help-content .evidence-row { grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 0; border: 0; }
 .learning-help-content .evidence-row > i { display: none; }
 .learning-help-content .evidence-row strong { font-size: 15px; line-height: 23px; font-weight: 500; }
@@ -4419,6 +4405,7 @@ progress::-moz-progress-bar { background: #8068de; border-radius: 4px; }
 
 /* Inline words preserve the sentence's typography and wrapping. */
 .scene button.word-token { all: unset; display: inline; color: inherit; font: inherit; letter-spacing: inherit; line-height: inherit; pointer-events: auto; cursor: pointer; border-radius: 3px; }
+.help-replaceable, .scene button.word-token.is-help-replaceable { color: #71509b; }
 .scene button.word-token:hover { background: #ad92d72b; }
 .scene button.word-token.is-word-selected { color: #65468e; background: #dbcdef; box-shadow: 0 0 0 2px #dbcdef; }
 .scene button.word-token:focus-visible { outline: 2px solid #9877c7; outline-offset: 2px; }

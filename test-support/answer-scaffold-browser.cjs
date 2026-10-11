@@ -66,7 +66,8 @@ async function assertScaffold(page, expectedSupport = 2) {
   assert.equal(await page.locator('#learningHelpPanel').getAttribute('data-mode'), 'scaffold');
   assert.ok(await page.locator('ol.help-answer-plan li').count() >= 2, 'an optional answer plan is available');
   assert.equal(await page.locator('[data-help-plan]').evaluate(element => element.open), false, 'extra planning stays collapsed initially');
-  assert.match(await page.locator('#helpAnswerStarter').innerText(), /\[/, 'starter marks editable personal information');
+  assert.doesNotMatch(await page.locator('#helpAnswerStarter').innerText(), /[\[\]]|_{2,}/, 'starter is ready to read without blanks');
+  assert.ok(await page.locator('#helpAnswerStarter .is-help-replaceable').count() > 0, 'personal details remain visibly distinct after word lookup decorates');
   assert.equal(await page.locator('.learning-help-options').isVisible(), true, 'alternate help stays one click away');
   assert.equal(await page.locator('.learning-help-options button').count(), 4);
   assert.equal(await page.locator('#learningHelpPanel').getAttribute('role'), 'region');
@@ -100,9 +101,11 @@ function answerFixture(marker) {
   return {
     meaning: `${marker}：说清自己如何作出取舍。`,
     answerPlan: ['说一个你实际考虑过的方案', '解释选择它的一个真实原因'],
-    answerStarter: `I chose [my actual option] because [my reason]. ${marker}`,
-    model: `I considered [option A] and [option B]. I chose [my option] because [my reason]. ${marker}`,
-    note: '把方括号替换为真实经历，不需要编造数据。',
+    answerStarter: `I chose a shorter form because it was easier to follow. ${marker}`,
+    answerStarterHighlights: ['a shorter form', 'it was easier to follow'],
+    model: `I considered a single form and a step-by-step flow. I chose the step-by-step flow because it was easier to follow. ${marker}`,
+    modelHighlights: ['a single form', 'a step-by-step flow', 'the step-by-step flow', 'it was easier to follow'],
+    note: '示例供跟读；紫色内容可换成你的情况。',
   };
 }
 
@@ -141,7 +144,8 @@ function answerFixture(marker) {
       assert.equal(await page.locator('#helpAnswerExample').isVisible(), true);
       assert.equal(await page.evaluate(() => LumaExperience.supportLevel()), 3);
       assert.deepEqual(await unchangedEvidence(page), before);
-      assert.match(await page.locator('#helpAnswerExample').innerText(), /\[/);
+      assert.doesNotMatch(await page.locator('#helpAnswerExample').innerText(), /[\[\]]|_{2,}/);
+      assert.ok(await page.locator('#helpAnswerExample .is-help-replaceable').count() > 0);
       await closeHelp(page);
       await page.locator('#taskHelpToggle').click();
       await assertScaffold(page, 3);
@@ -241,14 +245,14 @@ function answerFixture(marker) {
       currentSceneConfig().tasks[state.taskIndex].support = {
         responseMode: 'structured', meaning: '测试通用回答支架，不依赖面试场景判断。',
         answerPlan: ['说出自己的选择', '说明一个真实原因'],
-        answerStarter: 'I chose [my drink] because [my reason].',
-        model: 'I chose [my drink] because [my reason].', note: '只使用真实偏好。',
+        answerStarter: 'I chose a latte because I like milk.', answerStarterHighlights: ['a latte', 'I like milk'],
+        model: 'I chose a latte because I like milk.', modelHighlights: ['a latte', 'I like milk'], note: '示例可换成你的真实偏好。',
       };
       state.sessionGoals[currentTask().id].supportLevel = 0;
     });
     await page.locator('#helpButton').click();
     await assertScaffold(page);
-    assert.match(await page.locator('#helpAnswerStarter').innerText(), /my drink/);
+    assert.match(await page.locator('#helpAnswerStarter').innerText(), /a latte/);
     await closeHelp(page);
     results.push({ kind: 'shared-task-configuration', coffeeSimpleHelp: true, nonInterviewStructuredSupport: true });
 

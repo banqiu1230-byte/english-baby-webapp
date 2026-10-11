@@ -5,6 +5,8 @@
   const canvas = document.getElementById('worldMapCanvas');
   const markerLayer = document.getElementById('worldMapMarkers');
   if (!viewport || !canvas || !markerLayer) return;
+  const map = viewport.closest('.life-world-map');
+  const header = map?.querySelector('.world-life-header');
   let markers = [];
 
   const zoomIn = document.getElementById('mapZoomIn');
@@ -12,12 +14,15 @@
   const recenter = document.getElementById('mapRecenter');
   const label = document.getElementById('mapZoomLabel');
   const MIN = 1, MAX = Math.max(MIN, Number(viewport.dataset.maxScale) || 2.5), DRAG_THRESHOLD = 6;
+  const OVERSCROLL_LIMIT = 32, EDGE_RESISTANCE = .45, RETURN_DURATION = 280;
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const initialScale = clamp(Number(viewport.dataset.initialScale) || 1.12, MIN, MAX);
   const pointers = new Map();
   let width = 0, height = 0, scale = initialScale, x = 0, y = 0;
   let originX = 0, originY = 0;
   let gesture = null, suppressClick = false, exploring = false;
+  let reboundFrame = 0;
 
   viewport.tabIndex = viewport.hasAttribute('tabindex') ? viewport.tabIndex : 0;
   if (!viewport.hasAttribute('aria-label')) viewport.setAttribute('aria-label', '世界地图，可拖动和缩放');
@@ -32,9 +37,11 @@
   if (recenter && !recenter.hasAttribute('aria-label')) recenter.setAttribute('aria-label', '回到当前地点');
   if (label) { label.setAttribute('role', 'status'); label.setAttribute('aria-live', 'polite'); }
 
-  function render() {
-    x = clamp(x, width * (1 - scale), 0);
-    y = clamp(y, height * (1 - scale), 0);
+  function render({ elastic = false } = {}) {
+    if (!elastic) {
+      x = clamp(x, width * (1 - scale), 0);
+      y = clamp(y, height * (1 - scale), 0);
+    }
     canvas.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
     // Keep pins outside the scaled canvas so their text and images are never resampled.
     const pixelRatio = window.devicePixelRatio || 1;
@@ -52,7 +59,49 @@
     }
   }
 
+  // The artwork has a 40px bleed; resistance never exposes more than 32px.
+  function resist(value, min) {
+    const edge = clamp(value, min, 0), distance = value - edge;
+    return edge + OVERSCROLL_LIMIT * distance / (Math.abs(distance) + OVERSCROLL_LIMIT / EDGE_RESISTANCE);
+  }
+
+  function unresisted(value, min) {
+    const edge = clamp(value, min, 0), distance = value - edge;
+    return edge + distance * OVERSCROLL_LIMIT / EDGE_RESISTANCE / Math.max(.01, OVERSCROLL_LIMIT - Math.abs(distance));
+  }
+
+  function stopRebound() {
+    if (reboundFrame) cancelAnimationFrame(reboundFrame);
+    reboundFrame = 0;
+    viewport.classList.remove('is-rebounding');
+  }
+
+  function settle() {
+    stopRebound();
+    const fromX = x, fromY = y;
+    const toX = clamp(x, width * (1 - scale), 0), toY = clamp(y, height * (1 - scale), 0);
+    if (reducedMotion.matches || Math.hypot(toX - x, toY - y) < .5) { render(); return; }
+    const started = performance.now();
+    viewport.classList.add('is-rebounding');
+    const frame = now => {
+      const progress = Math.min(1, (now - started) / RETURN_DURATION);
+      const eased = 1 - (1 - progress) ** 3;
+      x = fromX + (toX - fromX) * eased;
+      y = fromY + (toY - fromY) * eased;
+      render({ elastic: true });
+      if (progress < 1) reboundFrame = requestAnimationFrame(frame);
+      else { stopRebound(); render(); }
+    };
+    reboundFrame = requestAnimationFrame(frame);
+  }
+
+  function positionControls() {
+    if (header?.offsetHeight) map.style.setProperty('--world-map-toolbar-top', `${header.offsetTop + header.offsetHeight + 12}px`);
+  }
+
   function resize() {
+    stopRebound();
+    positionControls();
     const nextWidth = viewport.clientWidth, nextHeight = viewport.clientHeight;
     if (!nextWidth || !nextHeight) { cancelPointers(); return; }
     const centerX = width ? (width / 2 - x) / (scale * width) : .5;
@@ -89,6 +138,7 @@
   }
 
   function zoomTo(value, center = { x: width / 2, y: height / 2 }) {
+    stopRebound();
     const next = clamp(value, MIN, MAX);
     const ratio = next / scale;
     x = center.x - (center.x - x) * ratio;
@@ -103,11 +153,13 @@
       const [a, b] = active;
       const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       gesture = { type: 'pinch', distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
-        scale, anchorX: (center.x - x) / scale, anchorY: (center.y - y) / scale };
+        scale, anchorX: (center.x - unresisted(x, width * (1 - scale))) / scale,
+        anchorY: (center.y - unresisted(y, height * (1 - scale))) / scale };
       suppressClick = true;
       viewport.classList.add('is-dragging');
     } else if (active.length === 1) {
-      gesture = { type: 'drag', start: { x: active[0].x, y: active[0].y }, x, y,
+      gesture = { type: 'drag', start: { x: active[0].x, y: active[0].y },
+        x: unresisted(x, width * (1 - scale)), y: unresisted(y, height * (1 - scale)),
         moved: suppressClick };
     } else {
       gesture = null;
@@ -122,17 +174,20 @@
   }
 
   function cancelPointers() {
+    stopRebound();
     const captured = [...pointers.entries()];
     suppressClick = suppressClick || captured.length > 0;
     pointers.clear();
     gesture = null;
     viewport.classList.remove('is-dragging');
     captured.forEach(([id, pointer]) => release(id, pointer));
+    render();
   }
 
   viewport.addEventListener('pointerdown', event => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     if (!width || !height || !viewport.getClientRects().length) return;
+    stopRebound();
     if (!pointers.size) { suppressClick = false; exploring = false; }
     const target = event.target instanceof Element ? event.target : viewport;
     pointers.set(event.pointerId, { ...point(event), target });
@@ -162,7 +217,9 @@
       x = gesture.x + dx; y = gesture.y + dy;
     }
     event.preventDefault();
-    render();
+    x = resist(x, width * (1 - scale));
+    y = resist(y, height * (1 - scale));
+    render({ elastic: true });
     if (!exploring && (x !== previousX || y !== previousY || scale !== previousScale)) {
       exploring = true;
       announceExploration();
@@ -175,6 +232,7 @@
     pointers.delete(event.pointerId);
     release(event.pointerId, pointer);
     startGesture();
+    if (!pointers.size) settle();
   }
   viewport.addEventListener('pointerup', endPointer);
   viewport.addEventListener('pointercancel', endPointer);
@@ -234,6 +292,8 @@
 
   viewport.addEventListener('keydown', event => {
     if (event.target !== viewport || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (!['+', '=', '-', '0', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    stopRebound();
     const previousX = x, previousY = y, previousScale = scale;
     if (event.key === '+' || event.key === '=') zoomTo(scale + .25);
     else if (event.key === '-') zoomTo(scale - .25);
@@ -259,6 +319,7 @@
     else resize();
   }).observe(view, { attributes: true, attributeFilter: ['hidden', 'class', 'aria-hidden'] });
   new ResizeObserver(resize).observe(viewport);
+  if (header) new ResizeObserver(positionControls).observe(header);
   refresh();
   window.LumaWorldMap = Object.freeze({ reset, focusCurrent, focusPlace, refresh });
 })();

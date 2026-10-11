@@ -153,6 +153,23 @@ async function assertDecorationStable(page, selector) {
   return { exact: geometry.exact, before: geometry.before, after: geometry.after, tokens: geometry.ranges.length };
 }
 
+async function assertFilledHelp(page, selector) {
+  const result = await page.locator(selector).evaluate(source => {
+    const text = source.textContent, ranges = JSON.parse(source.dataset.helpReplacements || '[]');
+    return { text, ranges, words: [...source.querySelectorAll('.word-token')].map(button => ({ text: button.textContent,
+      start: Number(button.dataset.start), end: Number(button.dataset.end), replaceable: button.classList.contains('is-help-replaceable') })) };
+  });
+  assert.doesNotMatch(result.text, /\[[^\]]+\]|_{2,}/, 'help is a filled example instead of a fill-in exercise');
+  assert.ok(result.ranges.length && result.words.some(word => word.replaceable), 'editable example phrases remain visually marked after tokenization');
+  assert.ok(result.words.some(word => !word.replaceable), 'ordinary words retain their normal styling');
+  for (const word of result.words) {
+    assert.equal(word.replaceable, result.ranges.some(range => word.start < range.end && word.end > range.start),
+      `the word ${word.text} is styled only when it intersects an editable phrase`);
+    assert.equal(result.text.slice(word.start, word.end), word.text, 'highlight styling preserves lookup offsets');
+  }
+  return { text: result.text, replaceableWords: result.words.filter(word => word.replaceable).map(word => word.text) };
+}
+
 (async () => {
   const browser = await chromium.launch({ headless: true, channel: 'chrome' });
   try {
@@ -204,12 +221,20 @@ async function assertDecorationStable(page, selector) {
       await page.locator('#helpButton').click();
       await page.locator('#helpAnswerStarter .word-token').first().waitFor({ state: 'visible' });
       const starter = await assertDecorationStable(page, '#helpAnswerStarter');
-      assert.match(starter.exact, /\[/, 'personal placeholders remain readable');
-      await page.locator('#helpAnswerStarter .word-token').first().click();
+      const filledStarter = await assertFilledHelp(page, '#helpAnswerStarter');
+      const editableStarterWord = page.locator('#helpAnswerStarter .word-token.is-help-replaceable').first();
+      const editableStarterText = await editableStarterWord.textContent();
+      const starterRequestCount = requests.length;
+      await editableStarterWord.click();
       await cardLoaded(page, '本句中的');
+      assert.equal(requests.length, starterRequestCount + 1);
+      assert.equal(requests.at(-1).text, filledStarter.text, 'a highlighted word is queried in the complete filled sentence');
+      assert.equal(requests.at(-1).text.slice(requests.at(-1).start, requests.at(-1).end), editableStarterText);
+      assert.ok(await page.locator('#helpAnswerStarter .is-help-replaceable.is-word-selected').count(), 'lookup selection and editable-word styling coexist');
       await checkBounds(page, `starter card ${width}px`);
       await closeCard(page);
       await page.locator('[data-help-example]').click();
+      const filledModel = await assertFilledHelp(page, '#helpAnswerExample .help-model-text');
       const modelToken = page.locator('#helpAnswerExample .word-token').first();
       await modelToken.scrollIntoViewIfNeeded();
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -224,8 +249,64 @@ async function assertDecorationStable(page, selector) {
       });
       if (scrollable) await page.locator('#wordLookupCard').waitFor({ state: 'hidden' });
       else await closeCard(page);
-      assert.match(await page.locator('#helpAnswerExample').innerText(), /\[/, 'full model preserves the editable placeholders');
-      results.push({ kind: 'responsive-surfaces', width, height, plain, starter, bounds, phrase: true, pronunciation: true, evidenceUnchanged: true });
+      results.push({ kind: 'responsive-surfaces', width, height, plain, starter, filledStarter, filledModel, bounds,
+        phrase: true, pronunciation: true, evidenceUnchanged: true });
+      await page.close();
+    }
+
+    {
+      const { page, requests } = await fixturePage(browser, 393, 852);
+      await start(page); await page.locator('#helpButton').click();
+      const text = '🧑‍💻 I’m responsible for user interviews and research.';
+      await page.evaluate(text => {
+        const source = document.createElement('p'); source.id = 'replacementRangeFixture';
+        const start = text.indexOf('user interviews'), end = start + 'user interviews'.length;
+        source.dataset.helpReplacements = JSON.stringify([{ start, end }]);
+        const marked = document.createElement('span'); marked.className = 'help-replaceable'; marked.textContent = text.slice(start, end);
+        source.append(document.createTextNode(text.slice(0, start)), marked, document.createTextNode(text.slice(end)));
+        document.querySelector('#learningHelpContent').replaceChildren(source);
+      }, text);
+      await page.locator('#replacementRangeFixture .word-token.is-help-replaceable').first().waitFor();
+      await assertFilledHelp(page, '#replacementRangeFixture');
+      await token(page, '#replacementRangeFixture', 'interviews').click();
+      await cardLoaded(page, '本句中的');
+      assert.equal(requests.at(-1).text, text, 'Unicode before a highlighted phrase preserves the complete lookup context');
+      assert.equal(text.slice(requests.at(-1).start, requests.at(-1).end), 'interviews', 'lookup uses UTF16 string offsets');
+      await token(page, '#replacementRangeFixture', 'interviews').focus();
+      await page.evaluate(() => {
+        const source = document.querySelector('#replacementRangeFixture');
+        window.__replacementMutations = 0;
+        window.__replacementObserver = new MutationObserver(records => {
+          window.__replacementMutations += records.filter(record => record.type === 'childList').length;
+        });
+        window.__replacementObserver.observe(source, { childList: true, subtree: true });
+        const start = source.textContent.indexOf('research');
+        source.dataset.helpReplacements = JSON.stringify([
+          { start: start + 1, end: start + 3 }, { start: -1, end: 4 },
+          { start: '0', end: 3 }, { start: 0, end: source.textContent.length + 1 }, null,
+        ]);
+      });
+      await page.waitForFunction(() => {
+        const highlighted = [...document.querySelectorAll('#replacementRangeFixture .is-help-replaceable')];
+        return highlighted.length === 1 && highlighted[0].textContent === 'research';
+      });
+      assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'interviews', 'metadata-only refresh preserves keyboard focus');
+      assert.equal(await page.locator('#replacementRangeFixture .is-word-selected').textContent(), 'interviews', 'metadata-only refresh preserves the current lookup selection');
+      assert.equal(await page.locator('#wordLookupCard').isVisible(), true);
+      assert.equal(requests.length, 1, 'color annotation updates do not repeat a lookup');
+      await page.keyboard.press('ArrowRight');
+      assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'and', 'keyboard navigation still works after metadata refresh');
+      await page.waitForTimeout(150);
+      assert.equal(await page.evaluate(() => window.__replacementMutations), 1, 'MutationObserver performs one refresh and then settles');
+      await page.evaluate(() => {
+        window.__replacementObserver.disconnect();
+        document.querySelector('#replacementRangeFixture').dataset.helpReplacements = '{invalid';
+      });
+      await page.waitForFunction(() => !document.querySelector('#replacementRangeFixture .is-help-replaceable'));
+      assert.equal(await page.locator('#replacementRangeFixture').textContent(), text, 'invalid annotations preserve readable source content');
+      assert.equal(await page.locator('#wordLookupCard').isVisible(), true, 'invalid annotations cannot disrupt an active word lookup');
+      results.push({ kind: 'editable-help-metadata', utf16Offsets: true, overlappingWordHighlight: true,
+        metadataOnlyRefresh: true, selectionAndFocusPreserved: true, observerSettles: true, invalidRangesIgnored: true });
       await page.close();
     }
 

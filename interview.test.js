@@ -59,7 +59,7 @@ test('all interview steps expose speech prompts and honest progressive help', ()
   }
 });
 
-test('substantive interview questions offer a usable plan and fill-in start before the optional model', () => {
+test('interview help offers readable filled examples and precise replaceable phrases', () => {
   const conciseIds = new Set(['interview-greeting', 'interview-closing-goodbye']);
   const plans = new Set();
   for (const item of Interview.tasks) {
@@ -68,9 +68,24 @@ test('substantive interview questions offer a usable plan and fill-in start befo
     assert.equal(Interview.supportFor(item), support);
     assert.equal(support.responseMode, conciseIds.has(item.id) ? 'concise' : 'structured');
     assert.match(support.meaning, /[\u4e00-\u9fff]/, `${item.id}: Chinese meaning`);
+    assert.equal(support.answerStarter, support.starter, `${item.id}: all starter paths share one example`);
+    for (const [textKey, highlightsKey] of [['answerStarter', 'answerStarterHighlights'], ['model', 'modelHighlights']]) {
+      const text = support[textKey], highlights = support[highlightsKey];
+      assert.doesNotMatch(text, /[\[\]_…]|\.\.\./, `${item.id}: ${textKey} can be read without filling blanks`);
+      assert.ok(Array.isArray(highlights), `${item.id}: ${highlightsKey} is explicit`);
+      assert.equal(new Set(highlights).size, highlights.length, `${item.id}: distinct replaceable phrases`);
+      const ranges = highlights.map(phrase => {
+        assert.ok(phrase.trim(), `${item.id}: nonempty highlight`);
+        const start = text.indexOf(phrase);
+        assert.ok(start >= 0, `${item.id}: ${phrase} exactly matches its example`);
+        return [start, start + phrase.length];
+      }).sort((a, b) => a[0] - b[0]);
+      for (let i = 1; i < ranges.length; i += 1) {
+        assert.ok(ranges[i][0] >= ranges[i - 1][1], `${item.id}: highlights do not overlap`);
+      }
+    }
     if (support.responseMode === 'concise') {
       assert.deepEqual(support.answerPlan, [], `${item.id}: no unnecessary answer outline`);
-      assert.equal(support.answerStarter, support.starter);
       continue;
     }
     assert.ok(support.answerPlan.length >= 2 && support.answerPlan.length <= 3, `${item.id}: short plan`);
@@ -79,7 +94,11 @@ test('substantive interview questions offer a usable plan and fill-in start befo
     const plan = support.answerPlan.join(' ');
     assert.ok(!plans.has(plan), `${item.id}: task-specific plan, not repeated generic advice`);
     plans.add(plan);
-    assert.match(support.answerStarter, /[A-Za-z].*\[[^\]]*[\u4e00-\u9fff][^\]]*\]/, `${item.id}: English frame with clear fill-in slots`);
+    assert.match(support.answerStarter, /^[A-Za-z].*[.!?]$/, `${item.id}: complete spoken start`);
+    assert.ok(support.answerStarterHighlights.length > 0, `${item.id}: editable start is marked`);
+    assert.ok(support.modelHighlights.length > 0, `${item.id}: editable full example is marked`);
+    assert.match(item.hint, /虚构示例供跟读；紫色内容可换成你的经历/, `${item.id}: example is not the learner's biography`);
+    assert.doesNotMatch(item.hint, /方括号|填空/);
     assert.ok(support.answerStarter.length < 125, `${item.id}: one manageable start`);
     assert.notEqual(support.answerStarter, support.model, `${item.id}: full model remains separate`);
     assert.doesNotMatch(`${plan} ${support.answerStarter} ${support.model}`, /\b(?:six|6) years|Pinduoduo|Temu|\d+%|increased (?:sales|conversion) by/i);
@@ -105,6 +124,9 @@ test('answer scaffolds support honest limits and focus on the actual question', 
   assert.match(plan('closing-questions'), /没有问题/);
   assert.match(Interview.supportFor('interview-closing-questions').answerStarter, /\?$/);
   assert.match(Interview.instructionsFor('interview-ownership'), /not factual content about the learner or a checklist to complete/);
+  assert.match(Interview.instructionsFor('interview-ownership'), /fictional mobile-shopping refund project/);
+  assert.match(Interview.instructionsFor('interview-ownership'), /do not treat any example detail as their experience/);
+  assert.doesNotMatch(Interview.instructionsFor('interview-ownership'), /Bracketed text/);
 });
 
 test('unknown tasks do not acquire a fake interview identity; mission fallback is deterministic', () => {

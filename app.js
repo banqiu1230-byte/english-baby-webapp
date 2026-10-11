@@ -1389,9 +1389,18 @@ function dialogueMarkup(message) {
 }
 
 function fitRecentDialogue() {
+  if (languagePanel.hidden || !state.sceneStarted) return;
+  // Help grows inside the top HUD. Reserve its real height so captions can
+  // scroll in the remaining space even on short screens or larger text sizes.
+  const topbar = scene.querySelector('.experience-topbar').getBoundingClientRect();
+  const hud = sceneTaskHud.getBoundingClientRect();
+  const top = Math.max(topbar.bottom, sceneTaskHud.hidden ? 0 : hud.bottom);
+  const available = Math.max(0, languagePanel.getBoundingClientRect().bottom - top - 12);
+  languagePanel.style.setProperty('--dialogue-space', `${available}px`);
   recentDialogue.classList.remove('is-condensed');
-  // External names and receipts must stay within the existing subtitle band.
-  if (recentDialogue.scrollHeight > parseFloat(getComputedStyle(languagePanel).maxHeight)) {
+  // Keep both recent turns when they fit. A long latest turn retains every
+  // word and can scroll inside the caption area without covering the controls.
+  if (recentDialogue.scrollHeight > languagePanel.clientHeight + 1) {
     recentDialogue.classList.add('is-condensed');
   }
 }
@@ -4139,6 +4148,12 @@ if (primaryCta) { primaryCta.disabled = false; primaryCta.removeAttribute('aria-
 window.visualViewport?.addEventListener('resize', syncMobileViewport);
 window.visualViewport?.addEventListener('scroll', syncMobileViewport);
 window.addEventListener('resize', syncMobileViewport);
+if (typeof ResizeObserver === 'function') {
+  // Opening help, switching its tab, or receiving a longer hint changes the
+  // available subtitle area without a window resize or a new dialogue turn.
+  const dialogueLayoutObserver = new ResizeObserver(fitRecentDialogue);
+  dialogueLayoutObserver.observe(sceneTaskHud);
+}
 window.addEventListener('pagehide', () => {
   stopSpeechPlayback(); cancelSpeechCapture(); closeDuplexSession();
 });

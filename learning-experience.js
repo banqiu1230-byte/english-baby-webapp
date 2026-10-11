@@ -830,12 +830,44 @@
     return { question, authored, support: adapter.support?.() || current.support };
   }
 
+  // Exact text ranges let word lookup decorate a sentence without losing its sample details.
+  function renderExampleText(element, text, highlights = []) {
+    const value = String(text || '');
+    const ranges = [];
+    for (const phrase of Array.isArray(highlights) ? highlights : []) {
+      if (typeof phrase !== 'string' || !phrase) continue;
+      let start = value.indexOf(phrase);
+      while (start !== -1) {
+        ranges.push({ start, end: start + phrase.length });
+        start = value.indexOf(phrase, start + phrase.length);
+      }
+    }
+    ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+    const merged = [];
+    for (const range of ranges) {
+      const last = merged[merged.length - 1];
+      if (last && range.start <= last.end) last.end = Math.max(last.end, range.end);
+      else merged.push({ ...range });
+    }
+    element.dataset.helpReplacements = JSON.stringify(merged);
+    element.replaceChildren();
+    let cursor = 0;
+    for (const { start, end } of merged) {
+      element.append(document.createTextNode(value.slice(cursor, start)));
+      const span = document.createElement('span'); span.className = 'help-replaceable';
+      span.textContent = value.slice(start, end); element.append(span); cursor = end;
+    }
+    element.append(document.createTextNode(value.slice(cursor)));
+    return element;
+  }
+
   function renderAnswerScaffold(support, { loading = false, failed = false, showExample = false } = {}) {
     const content = $('learningHelpContent'); content.replaceChildren();
     const scroll = $('learningHelpPanel').querySelector('.learning-help-scroll');
     if (scroll) scroll.scrollTop = 0;
-    const paragraph = (text, className) => {
-      const element = document.createElement('p'); element.className = className; element.textContent = text; return element;
+    const paragraph = (text, className, highlights = []) => {
+      const element = document.createElement('p'); element.className = className;
+      return renderExampleText(element, text, highlights);
     };
     const question = s().activeQuestion || task().prompt;
     if (loading || failed) {
@@ -846,7 +878,7 @@
       noteHelp(1, 'meaning');
     }
     content.append(paragraph('先说一句', 'help-section-label'));
-    const starter = paragraph(support.answerStarter, 'help-answer-starter'); starter.id = 'helpAnswerStarter';
+    const starter = paragraph(support.answerStarter, 'help-answer-starter', support.answerStarterHighlights); starter.id = 'helpAnswerStarter';
     content.append(starter);
     if (!loading && !failed) content.append(paragraph(support.meaning, 'help-question-meaning'));
     noteHelp(2, 'keyword');
@@ -859,7 +891,7 @@
       const summary = document.createElement('summary'); summary.textContent = '展开回答思路';
       details.append(summary, plan); content.append(details);
     }
-    content.append(paragraph('把 [ ] 换成你的真实经历，也可以先说中文想法。', 'help-answer-note'));
+    if (!loading && !failed) content.append(paragraph('示例可直接跟读，紫色部分可换成你的情况。', 'help-answer-note'));
     if (support.model) {
       const reveal = document.createElement('button'); reveal.type = 'button'; reveal.dataset.helpExample = '';
       reveal.className = 'help-example-toggle'; reveal.textContent = '展开完整示例'; reveal.setAttribute('aria-expanded', 'false');
@@ -870,7 +902,7 @@
         reveal.textContent = example.hidden ? '展开完整示例' : '收起完整示例';
         if (!example.hidden) {
           noteHelp(3, 'example');
-          example.replaceChildren(paragraph(support.model, 'help-model-text'), paragraph(support.note || '方括号换成你的真实信息，不用照着全部说。', 'help-answer-note'));
+          example.replaceChildren(paragraph(support.model, 'help-model-text', support.modelHighlights));
           const play = document.createElement('button'); play.type = 'button'; play.className = 'help-example-play'; play.textContent = '听一遍示例';
           play.addEventListener('click', () => adapter.speak(support.model, { prompt: false })); example.append(play);
         }
@@ -964,18 +996,25 @@
         'confirm-belonging': 'mine · 我的', 'find-location': 'A12 · 登机口',
       };
       const starters = {
-        'state-purpose': ['I’m here to see _____.', '横线处填要见的人名。'],
-        'give-name': ['My name is _____.', '横线处填你的名字。'],
+        'state-purpose': ['I’m here to see Maya.', 'Maya'],
+        'give-name': ['My name is Li.', 'Li'],
       };
       const interviewTask = s().selectedScene === 'interview' ? InterviewModule?.taskById(task().id) : null;
       const keywords = interviewTask?.keywords;
       noteHelp(2, 'keyword');
-      if (starters[item[0]]) content.append(row(...starters[item[0]], 'key'));
+      if (starters[item[0]]) {
+        const [text, name] = starters[item[0]];
+        const entry = row(text, '示例可直接跟读，紫色部分可换成你的情况。', 'key');
+        renderExampleText(entry.querySelector('strong'), text, [name]); content.append(entry);
+      }
       else content.append(row(interviewTask ? '先抓住表达重点' : '先用一个词试试',
         (Array.isArray(keywords) ? keywords.join(' · ') : keywords) || words[item[0]] || item[3].split(' ').slice(0, 2).join(' '), 'key'));
     }
     else if (kind === 'example') {
-      noteHelp(3, 'example'); content.append(row(item[3], item[4], 'chat-circle'));
+      noteHelp(3, 'example');
+      const entry = row(item[3], item[4], 'chat-circle');
+      const highlights = context.support?.modelHighlights || ({ 'office-purpose': ['Maya'], 'office-signin': ['Li'] })[task().id];
+      renderExampleText(entry.querySelector('strong'), item[3], highlights); content.append(entry);
       if ((s().coffeeMissionId || s().coffee?.missionId) === 'C04')
         adapter.notify?.('已使用示范；这次仍可完成，复盘会如实记为借助帮助。', 4200);
       const play = document.createElement('button'); play.type = 'button'; play.className = 'help-example-play'; play.textContent = '听一遍示范';
@@ -1026,7 +1065,7 @@
   }
 
   window.LumaExperience = { resetIntroduction, noteCharacterLine, currentSession: () => sessionId, bind, store, lifeStore,
-    currentReward: () => lastReward, homeStep, previewScene, recordStudy,
+    currentReward: () => lastReward, homeStep, previewScene, recordStudy, renderExampleText,
     isHelpOpen: () => helpReading, isHelpVisible, learnerTurnStarted, toggleHelp,
     catalog: { TASKS, SCENE_TASKS, SCENES }, TASKS, SCENE_TASKS, SCENES,
     begin, supportLevel, noteExposure, noteHelp, noteAnswer, noteAction, checkpoint, complete, taskStarted, render, renderHome, renderReview, startHome, startReviewPractice, startTransfer, startRecommendation, closeHelp, openHelp, questionChanged };

@@ -6,7 +6,7 @@ const { once } = require('node:events');
 
 const input = { sceneId: 'interview', taskId: 'interview-background', question: 'What was your personal contribution?', history: [] };
 const scaffold = { meaning: '对方想知道你亲自做了什么。', answerPlan: ['先选一件你负责的事', '补一句你实际做了什么'],
-  answerStarter: 'My part was [your actual contribution].', model: '' };
+  answerStarter: 'My part was designing the checkout page.', answerStarterHighlights: ['designing the checkout page'], model: '', modelHighlights: [] };
 async function listen(server) { server.listen(0, '127.0.0.1'); await once(server, 'listening'); return server.address().port; }
 
 async function startApp(t, providerUrl, key = 'test-only-no-live-key') {
@@ -52,7 +52,9 @@ test('conversation help HTTP route stays bounded, contextual and separate from t
       const answer = await app.post({ ...input, sceneId, taskId, target: 'untrusted target' });
       assert.equal(answer.status, 200);
       assert.equal(answer.body.answerStarter, scaffold.answerStarter);
-      assert.match(answer.body.note, /真实情况/);
+      assert.deepEqual(answer.body.answerStarterHighlights, scaffold.answerStarterHighlights);
+      assert.deepEqual(answer.body.modelHighlights, []);
+      assert.equal(answer.body.note, '示例供跟读；紫色内容可换成你的情况。');
       assert.equal(answer.headers.get('cache-control'), 'no-store');
       assert.equal(received.at(-1).body.model, 'help-test-model');
       assert.deepEqual(JSON.parse(received.at(-1).body.messages[1].content), { ...input, sceneId, taskId });
@@ -74,10 +76,18 @@ test('conversation help HTTP route stays bounded, contextual and separate from t
     assert.deepEqual(answer.body, { error: 'conversation_help_unavailable' });
   });
   await t.test('invalid generated answers are rejected and the private module stays private', async () => {
-    providerStatus = 200; result = { ...scaffold, answerStarter: 'I led the team and improved conversion by 20%.' };
-    const answer = await app.post(input);
-    assert.equal(answer.status, 502);
-    assert.deepEqual(answer.body, { error: 'conversation_help_invalid_response' });
+    providerStatus = 200;
+    for (const invalid of [
+      { ...scaffold, answerStarter: 'My part was [your actual contribution].', answerStarterHighlights: [] },
+      { ...scaffold, answerStarterHighlights: ['a different page'] },
+      { ...scaffold, answerStarterHighlights: ['<b>designing the checkout page</b>'] },
+      { ...scaffold, modelHighlights: ['a page'] },
+    ]) {
+      result = invalid;
+      const answer = await app.post(input);
+      assert.equal(answer.status, 502);
+      assert.deepEqual(answer.body, { error: 'conversation_help_invalid_response' });
+    }
     assert.equal((await fetch(`${app.base}/conversation-help.js`)).status, 404);
     result = scaffold;
   });

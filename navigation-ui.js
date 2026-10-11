@@ -75,7 +75,12 @@
     for (const taskId of catalog.SCENE_TASKS[sceneId] || []) {
       const item = catalog.TASKS[taskId]; if (!item) continue;
       const card = el('article', null, 'dictionary-entry');
-      card.append(el('h3', item[1]), el('p', item[2]), el('p', item[3], 'dictionary-example'), el('p', item[4]));
+      const example = el('p', null, 'dictionary-example');
+      const interview = typeof Interview === 'undefined' ? window.Interview : Interview;
+      const highlights = sceneId === 'interview' ? interview?.taskById(taskId)?.support.modelHighlights
+        : ({ 'office-purpose': ['Maya'], 'office-signin': ['Li'] })[taskId];
+      experience().renderExampleText(example, item[3], highlights);
+      card.append(el('h3', item[1]), el('p', item[2]), example, el('p', item[4]));
       const play = button('听示范', () => { markStudy(sceneId, taskId); listen(item[3]); }); play.prepend(icon('speaker-high'));
       const tryIt = button('去场景里用', () => practice(sceneId, taskId)); tryIt.append(icon('arrow-right'));
       card.append(play, tryIt); content.append(card);

@@ -27,7 +27,8 @@ function memoryStorage() {
 }
 
 class Element {
-  constructor() {
+  constructor(tagName = '') {
+    this.tagName = tagName.toUpperCase();
     this.hidden = false; this.inert = false; this.parentElement = null;
     this.children = []; this.listeners = new Map(); this.selectors = new Map(); this.dataset = {};
     const classes = new Set();
@@ -46,7 +47,13 @@ class Element {
     for (const child of this.children) child.parentElement = null;
     this.children = []; this.append(...children);
   }
-  querySelectorAll(selector) { return this.selectors.get(selector) || []; }
+  querySelectorAll(selector) {
+    if (this.selectors.has(selector)) return this.selectors.get(selector);
+    if (!/^[a-z]+$/i.test(selector)) return [];
+    return this.children.flatMap(child => [
+      ...(child.tagName === selector.toUpperCase() ? [child] : []), ...child.querySelectorAll(selector),
+    ]);
+  }
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
   setAttribute(name, value) { this[name] = value; }
   getAttribute(name) { return this[name] ?? null; }
@@ -88,7 +95,8 @@ function setup({ sceneId = 'kitchen', storage = memoryStorage(), coffeeJourney =
     getElementById: id => nodes.get(id) || null,
     querySelector: selector => selector === '.intro-guidance' ? guidance
       : selector === '.journey-switch' ? journeySwitch : selector === '.primary-cta' ? primaryCta : null,
-    querySelectorAll: () => [], createElement: () => new Element(),
+    querySelectorAll: () => [], createElement: tag => new Element(tag),
+    createTextNode: text => Object.assign(new Element(), { textContent: text }),
   });
   const window = Object.assign(new Element(), { localStorage: storage, LumaWorldLoop: WorldLoop, LumaLifeExperience: Life });
   helpButton.focus = () => { document.activeElement = helpButton; };

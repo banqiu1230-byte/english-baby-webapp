@@ -35,11 +35,22 @@
   function decorate(source, value = source.textContent) {
     const text = String(value || '');
     const fullText = source.dataset.lookupText || text;
+    const replacementMetadata = source.dataset.helpReplacements || '';
     // Caption reveal may replace the token nodes while continuing the same
     // known sentence. Keep the lookup and rebind its anchor after that update.
     if (active?.source === source && (fullText !== active.fullText || !text.startsWith(active.visibleText)))
       close({ restoreFocus: false });
-    if (source.dataset.wordText === text && source.textContent === text) return;
+    if (source.dataset.wordText === text && source.textContent === text
+      && source.dataset.wordHelpReplacements === replacementMetadata) return;
+    // The help renderer annotates editable phrases with UTF-16 string offsets;
+    // retain that styling when replacing its inline spans with word controls.
+    let replacements = [];
+    try {
+      const parsed = JSON.parse(replacementMetadata || '[]');
+      if (Array.isArray(parsed)) replacements = parsed.filter(range => range && Number.isInteger(range.start)
+        && Number.isInteger(range.end) && range.start >= 0 && range.end > range.start && range.end <= text.length);
+    } catch { /* A malformed display annotation must not disable word lookup. */ }
+    const focusedStart = source.contains(document.activeElement) ? document.activeElement.dataset.start : null;
     const fragment = document.createDocumentFragment();
     let cursor = 0, count = 0;
     for (const match of text.matchAll(tokenPattern)) {
@@ -47,13 +58,24 @@
       fragment.append(document.createTextNode(text.slice(cursor, match.index)));
       const button = el('button', match[0], 'word-token'); button.type = 'button';
       button.dataset.start = String(match.index); button.dataset.end = String(match.index + match[0].length);
+      if (replacements.some(range => match.index < range.end && match.index + match[0].length > range.start))
+        button.classList.add('is-help-replaceable');
       button.tabIndex = count++ ? -1 : 0;
       button.setAttribute('aria-label', '查看 ' + match[0] + ' 的意思');
       fragment.append(button); cursor = match.index + match[0].length;
     }
     fragment.append(document.createTextNode(text.slice(cursor)));
     source.dataset.wordSource = ''; source.dataset.wordText = text;
+    source.dataset.wordHelpReplacements = replacementMetadata;
     source.replaceChildren(fragment);
+    if (focusedStart != null) {
+      const tokens = [...source.querySelectorAll('.word-token')];
+      const focused = tokens.find(token => token.dataset.start === focusedStart);
+      if (focused) {
+        for (const token of tokens) token.tabIndex = token === focused ? 0 : -1;
+        focused.focus({ preventScroll: true });
+      }
+    }
     if (active?.source === source) {
       active.trigger = [...source.querySelectorAll('.word-token')].find(token => Number(token.dataset.start) === active.start + active.offset);
       active.visibleText = text;
@@ -222,7 +244,7 @@
     if (active && !valid()) close({ restoreFocus: false });
     if (isOpen()) position();
   });
-  observer.observe(scene, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'class', 'aria-hidden', 'data-lookup-text'] });
+  observer.observe(scene, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'class', 'aria-hidden', 'data-lookup-text', 'data-help-replacements'] });
   window.LumaWords = { decorate, isOpen, isReading: () => reading, learnerTurnStarted, close,
     bind(value) { adapter = value; for (const source of scene.querySelectorAll(sources)) decorate(source); } };
 })();
